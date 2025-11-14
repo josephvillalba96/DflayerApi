@@ -26,6 +26,8 @@ class User(Base):
     username = Column(String(50), unique=True, nullable=False, index=True)
     email = Column(String(100), unique=True, nullable=False, index=True)
     password = Column(String(255), nullable=False)  # Password hash
+    email_verified = Column(Boolean, default=False)  # Email verification status
+    is_active = Column(Boolean, default=True)  # Account active status
     profile_picture = Column(String(500), nullable=True)
     cover_picture = Column(String(500), nullable=True)
     biography = Column(String(500), nullable=True)
@@ -77,4 +79,10 @@ class User(Base):
     
     # Plan relationships
     plans = relationship("UserPlan", back_populates="user")
+    
+    # Authentication relationships
+    email_verification = relationship("EmailVerification", back_populates="user", uselist=False)
+    two_factor_auth = relationship("TwoFactorAuth", back_populates="user", uselist=False)
+    two_factor_codes = relationship("TwoFactorCode", back_populates="user")
+    password_resets = relationship("PasswordReset", back_populates="user")
 

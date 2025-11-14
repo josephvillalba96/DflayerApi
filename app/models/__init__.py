@@ -40,6 +40,9 @@ from app.models.feed_item import FeedItem
 from app.models.user_preferences import UserPreferences, UserCategory
 from app.models.event_fund import EventFund
 from app.models.advertising_campaign import AdvertisingCampaign, SalesCommission
+from app.models.email_verification import EmailVerification
+from app.models.two_factor_auth import TwoFactorAuth, TwoFactorCode
+from app.models.password_reset import PasswordReset
 
 __all__ = [
     "Base",
@@ -87,4 +90,8 @@ __all__ = [
     "EventFund",
     "AdvertisingCampaign",
     "SalesCommission",
+    "EmailVerification",
+    "TwoFactorAuth",
+    "TwoFactorCode",
+    "PasswordReset",
 ]

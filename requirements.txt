@@ -8,11 +8,15 @@ pydantic-settings==2.1.0
 
 # Base de datos
 sqlalchemy==2.0.23
+alembic==1.12.1          # Migraciones de base de datos
+psycopg2-binary==2.9.9   # PostgreSQL adapter para SQLAlchemy
 
 # Seguridad y autenticación
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.6
+pyotp==2.9.0              # Two Factor Authentication (TOTP)
+qrcode[pil]==7.4.2        # QR code generation for 2FA
 
 # Utilidades
 python-dotenv==1.0.0

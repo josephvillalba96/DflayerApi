@@ -88,6 +88,168 @@ La API estará disponible en:
 - **Documentación interactiva (Swagger)**: http://localhost:8000/docs
 - **Documentación alternativa (ReDoc)**: http://localhost:8000/redoc
 
+## 🐳 Docker
+
+El proyecto está completamente dockerizado y listo para ejecutarse con Docker Compose, incluyendo PostgreSQL.
+
+### Prerrequisitos
+
+- Docker 20.10 o superior
+- Docker Compose 2.0 o superior
+
+### Inicio Rápido con Docker
+
+1. **Configurar variables de entorno** (opcional):
+```bash
+cp .env.example .env
+# Editar .env con tus configuraciones
+```
+
+2. **Construir y levantar los servicios**:
+```bash
+docker-compose up -d --build
+```
+
+Esto levantará:
+- **PostgreSQL** en el puerto 5432 (configurable)
+- **FastAPI API** en el puerto 8000
+
+3. **Ver los logs**:
+```bash
+# Ver todos los logs
+docker-compose logs -f
+
+# Ver solo logs de la API
+docker-compose logs -f api
+
+# Ver solo logs de la base de datos
+docker-compose logs -f db
+```
+
+4. **Detener los servicios**:
+```bash
+docker-compose down
+```
+
+5. **Detener y eliminar volúmenes** (incluye datos de BD):
+```bash
+docker-compose down -v
+```
+
+### Comandos Útiles de Docker
+
+```bash
+# Reconstruir solo la API
+docker-compose build api
+
+# Reiniciar un servicio específico
+docker-compose restart api
+
+# Ejecutar comandos dentro del contenedor
+docker-compose exec api bash
+docker-compose exec db psql -U dflayer_user -d dflayer_db
+
+# Ver estado de los servicios
+docker-compose ps
+
+# Ejecutar migraciones manualmente
+docker-compose exec api alembic upgrade head
+
+# Crear una nueva migración
+docker-compose exec api alembic revision --autogenerate -m "Migration name"
+```
+
+### Configuración de Docker Compose
+
+El archivo `docker-compose.yml` incluye:
+
+- **Servicio `db`**: PostgreSQL 16 Alpine
+  - Puerto: 5432 (configurable con `POSTGRES_PORT`)
+  - Usuario: `dflayer_user` (configurable)
+  - Base de datos: `dflayer_db` (configurable)
+  - Volumen persistente para datos
+  - Health check configurado
+
+- **Servicio `api`**: FastAPI Application
+  - Puerto: 8000 (configurable con `API_PORT`)
+  - Auto-reload en desarrollo
+  - Ejecuta migraciones automáticamente al iniciar
+  - Conectado a PostgreSQL automáticamente
+
+### Variables de Entorno para Docker
+
+Puedes configurar las siguientes variables en tu archivo `.env`:
+
+```bash
+# PostgreSQL
+POSTGRES_USER=dflayer_user
+POSTGRES_PASSWORD=dflayer_password
+POSTGRES_DB=dflayer_db
+POSTGRES_PORT=5432
+
+# API
+API_PORT=8000
+
+# Otras variables (ver .env.example)
+```
+
+### Producción con Docker
+
+Para producción, usa el archivo `docker-compose.prod.yml`:
+
+```bash
+# Construir y levantar en modo producción
+docker-compose -f docker-compose.prod.yml up -d --build
+```
+
+**Diferencias en producción**:
+- No monta código local (usa la imagen)
+- Restart policy: `always`
+- Variables de entorno deben estar todas configuradas
+- Base de datos solo expuesta en localhost
+
+### Estructura de Docker
+
+```
+DflayerApi/
+├── Dockerfile              # Imagen de la aplicación
+├── .dockerignore           # Archivos a ignorar en build
+├── docker-compose.yml      # Desarrollo
+└── docker-compose.prod.yml # Producción
+```
+
+### Troubleshooting Docker
+
+**Problema**: El contenedor de la API no puede conectarse a la base de datos
+```bash
+# Verificar que la BD esté saludable
+docker-compose ps
+docker-compose logs db
+
+# Verificar la URL de conexión
+docker-compose exec api env | grep DATABASE_URL
+```
+
+**Problema**: Las migraciones fallan
+```bash
+# Ejecutar migraciones manualmente
+docker-compose exec api alembic upgrade head
+
+# Ver logs de migraciones
+docker-compose logs api | grep -i migration
+```
+
+**Problema**: Puerto ya en uso
+```bash
+# Cambiar el puerto en .env
+API_PORT=8001
+POSTGRES_PORT=5433
+
+# Recrear servicios
+docker-compose down
+docker-compose up -d
+```
+
 ## 📚 Versionado de API
 
 El proyecto utiliza versionado de API mediante prefijos de ruta:
@@ -184,6 +346,269 @@ El proyecto sigue una arquitectura limpia y modular:
 La configuración de base de datos está preparada para usar SQLAlchemy. Actualmente se requiere configurar `DATABASE_URL` en el archivo `.env`.
 
 Modelos de base de datos se definirán en `app/models/` según el esquema del proyecto Multiplux.
+
+### Migraciones con Alembic
+
+El proyecto utiliza **Alembic** para gestionar las migraciones de base de datos de forma versionada y controlada.
+
+#### 📋 Configuración
+
+Alembic está completamente configurado y listo para usar:
+
+- **Archivo de configuración**: `alembic.ini`
+- **Directorio de migraciones**: `alembic/`
+- **Versiones de migraciones**: `alembic/versions/`
+- **Configuración del entorno**: `alembic/env.py`
+
+#### 🚀 Uso Básico
+
+##### 1. Inicializar Alembic (ya está inicializado)
+```bash
+# Si necesitas reinicializar (no necesario si ya está configurado)
+alembic init alembic
+```
+
+##### 2. Configurar Base de Datos
+
+**IMPORTANTE**: Antes de generar migraciones, debes configurar `DATABASE_URL` en tu archivo `.env`:
+
+```bash
+# Copiar el archivo de ejemplo
+cp .env.example .env
+
+# Editar .env y configurar DATABASE_URL
+# Para PostgreSQL:
+DATABASE_URL=postgresql://user:password@localhost:5432/dflayer_db
+
+# Para SQLite (desarrollo):
+DATABASE_URL=sqlite:///./app.db
+```
+
+Si no configuras `DATABASE_URL`, Alembic usará una base de datos SQLite temporal por defecto.
+
+##### 3. Crear una Migración Inicial
+```bash
+# Genera la migración inicial basada en todos los modelos
+alembic revision --autogenerate -m "Initial migration"
+```
+
+Esto creará un archivo en `alembic/versions/` con todas las tablas basadas en los modelos SQLAlchemy.
+
+##### 4. Revisar la Migración Generada
+```bash
+# Ver el contenido de la última migración generada
+# Edita el archivo en alembic/versions/ si necesitas ajustes
+```
+
+**Importante**: Siempre revisa las migraciones autogeneradas antes de aplicarlas, especialmente:
+- Verifica que las relaciones y foreign keys estén correctas
+- Revisa los tipos de datos
+- Confirma que los índices y constraints sean correctos
+
+##### 5. Aplicar Migraciones
+```bash
+# Aplicar todas las migraciones pendientes
+alembic upgrade head
+
+# Aplicar hasta una versión específica
+alembic upgrade <revision_id>
+
+# Ver el estado actual de las migraciones
+alembic current
+
+# Ver el historial de migraciones
+alembic history
+```
+
+##### 6. Revertir Migraciones
+```bash
+# Revertir la última migración
+alembic downgrade -1
+
+# Revertir hasta una versión específica
+alembic downgrade <revision_id>
+
+# Revertir todas las migraciones
+alembic downgrade base
+```
+
+#### 🔄 Flujo de Trabajo Recomendado
+
+##### Desarrollo de Nuevas Funcionalidades
+
+1. **Crear o modificar modelos** en `app/models/`
+2. **Generar migración automática**:
+   ```bash
+   alembic revision --autogenerate -m "Add new feature models"
+   ```
+3. **Revisar la migración generada** en `alembic/versions/`
+4. **Aplicar la migración**:
+   ```bash
+   alembic upgrade head
+   ```
+5. **Verificar** que todo funcione correctamente
+
+##### Ejemplo Completo
+
+```bash
+# 1. Modificas un modelo (ej: agregas un campo a User)
+# app/models/user.py
+# ... agregas nuevo campo ...
+
+# 2. Generas la migración
+alembic revision --autogenerate -m "Add phone_number to users"
+
+# 3. Revisas el archivo generado
+# alembic/versions/xxxx_add_phone_number_to_users.py
+
+# 4. Aplicas la migración
+alembic upgrade head
+
+# 5. Verificas el estado
+alembic current
+```
+
+#### 📝 Comandos Útiles
+
+##### Crear Migración Manual
+```bash
+# Si necesitas crear una migración sin autogenerar
+alembic revision -m "Custom migration description"
+```
+
+##### Ver Diferencias
+```bash
+# Ver qué cambios detecta Alembic sin crear migración
+alembic check
+```
+
+##### Generar SQL sin Aplicar
+```bash
+# Generar SQL de la migración sin ejecutarla
+alembic upgrade head --sql
+```
+
+##### Migración a Versión Específica
+```bash
+# Ver todas las revisiones disponibles
+alembic history
+
+# Migrar a una revisión específica
+alembic upgrade <revision_id>
+alembic downgrade <revision_id>
+```
+
+#### ⚙️ Configuración Avanzada
+
+##### Variables de Entorno
+
+Alembic usa automáticamente `DATABASE_URL` de tu archivo `.env`:
+
+```bash
+# .env
+DATABASE_URL=postgresql://user:password@localhost/dflayer_db
+```
+
+##### Personalizar la Configuración
+
+El archivo `alembic/env.py` está configurado para:
+- ✅ Importar automáticamente todos los modelos
+- ✅ Usar `DATABASE_URL` de settings
+- ✅ Generar migraciones basadas en `Base.metadata`
+
+##### Estructura de Archivos de Migración
+
+Cada migración en `alembic/versions/` contiene:
+
+```python
+"""Add new feature
+
+Revision ID: abc123
+Revises: xyz789
+Create Date: 2024-01-15 10:30:00
+"""
+from alembic import op
+import sqlalchemy as sa
+
+revision = 'abc123'
+down_revision = 'xyz789'
+
+def upgrade():
+    # Cambios a aplicar
+    op.add_column('users', sa.Column('phone_number', sa.String(20)))
+
+def downgrade():
+    # Cambios a revertir
+    op.drop_column('users', 'phone_number')
+```
+
+#### 🚨 Mejores Prácticas
+
+1. **Siempre revisa las migraciones autogeneradas** antes de aplicarlas
+2. **Usa mensajes descriptivos** en las migraciones: `-m "Add user phone number"`
+3. **Haz backup de la BD** antes de aplicar migraciones en producción
+4. **Prueba las migraciones** en un entorno de desarrollo primero
+5. **No edites migraciones ya aplicadas** - crea nuevas migraciones
+6. **Mantén las migraciones pequeñas** - una funcionalidad por migración
+7. **Documenta migraciones complejas** con comentarios en el código
+
+#### 🔍 Troubleshooting
+
+##### Error: "Target database is not up to date"
+```bash
+# Ver el estado actual
+alembic current
+
+# Aplicar migraciones pendientes
+alembic upgrade head
+```
+
+##### Error: "Can't locate revision identified by 'xxxx'"
+```bash
+# Ver el historial completo
+alembic history
+
+# Verificar la cadena de revisiones
+alembic branches
+alembic heads
+```
+
+##### Autogenerate no detecta cambios
+```bash
+# Asegúrate de que:
+# 1. Los modelos están importados en alembic/env.py
+# 2. Los modelos heredan de Base
+# 3. La base de datos está actualizada
+alembic check
+```
+
+##### Resetear migraciones (solo desarrollo)
+```bash
+# ⚠️ SOLO EN DESARROLLO - Esto elimina todas las migraciones
+# 1. Eliminar todas las tablas manualmente
+# 2. Eliminar archivos en alembic/versions/ (excepto .gitkeep)
+# 3. Crear nueva migración inicial
+alembic revision --autogenerate -m "Initial migration"
+alembic upgrade head
+```
+
+#### 📊 Modelos Soportados
+
+Alembic está configurado para detectar automáticamente cambios en todos los modelos:
+
+- ✅ Location, TaxData, User
+- ✅ Category, Content, Hashtag, ContentHashtag
+- ✅ ContentMetrics, MultimediaFile, FileVersion
+- ✅ TranscodingJob, TranscodingProfile, TranscodingQueue, TranscodingLog
+- ✅ Follow, Like, Comment
+- ✅ MonetizableAction, Interaction
+- ✅ Transaction, PaymentDistribution, DistributionLevel
+- ✅ Voucher, MultiplierPlan, UserPlan
+- ✅ Notification, FeedItem
+- ✅ UserPreferences, UserCategory
+- ✅ EventFund, AdvertisingCampaign, SalesCommission
+
+Todos los modelos están importados en `alembic/env.py` para autogeneración.
 
 ## 🎬 Sistema de Transcodificación
 

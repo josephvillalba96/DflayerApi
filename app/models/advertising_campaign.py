@@ -1,7 +1,7 @@
 """
 Advertising Campaign Model
 """
-from sqlalchemy import Column, Integer, Float, Date, ForeignKey
+from sqlalchemy import Column, Integer, Float, Boolean, Date, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.models.base import Base
