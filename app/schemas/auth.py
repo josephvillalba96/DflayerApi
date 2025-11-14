@@ -9,12 +9,18 @@ from app.schemas.base import BaseSchema
 
 # Registration Schemas
 class UserRegisterRequest(BaseModel):
-    """Schema for user registration"""
+    """
+    Schema for user registration
+    
+    Nota: El user_type es siempre 'client' por defecto y no puede ser modificado
+    por el usuario durante el registro. Solo los administradores pueden cambiar
+    el tipo de usuario después del registro.
+    """
     email: EmailStr
     password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
     name: str = Field(..., min_length=2, max_length=100)
     username: str = Field(..., min_length=3, max_length=50, pattern="^[a-zA-Z0-9_]+$")
-    user_type: str = Field(default="client", pattern="^(client|merchant|affiliate)$")
+    # user_type removido - siempre será 'client' por defecto (solo administradores pueden cambiarlo)
     
     @validator('password')
     def validate_password(cls, v):

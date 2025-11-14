@@ -275,6 +275,75 @@ Las principales variables de entorno se configuran en el archivo `.env`:
 | `BACKEND_CORS_ORIGINS` | Orígenes permitidos CORS | http://localhost:3000 |
 | `DEBUG` | Modo debug | True/False |
 
+### Configuración de Email
+
+El sistema soporta dos proveedores de email: **SMTP** (Gmail compatible) y **SendGrid**. Por defecto, el sistema usa **SMTP**. Puedes cambiar el proveedor mediante la variable `EMAIL_PROVIDER` en tu archivo `.env`.
+
+#### Usando SMTP (Gmail) - **Predeterminado**
+
+El sistema usa SMTP por defecto. Para configurar Gmail o cualquier servidor SMTP compatible, configura las siguientes variables en tu `.env`:
+
+```bash
+# Seleccionar SMTP como proveedor (ya es el predeterminado)
+EMAIL_PROVIDER=smtp
+
+# Configuración SMTP para Gmail
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=tu-email@gmail.com
+SMTP_PASSWORD=tu-app-password-de-gmail
+SMTP_FROM_EMAIL=tu-email@gmail.com
+SMTP_FROM_NAME=DflayerApi
+SMTP_USE_TLS=True
+```
+
+**Nota:** Si no configuras `EMAIL_PROVIDER`, el sistema usará SMTP automáticamente.
+
+**Configuración de Gmail:**
+
+1. **Habilitar verificación en 2 pasos** en tu cuenta de Google
+2. **Generar una Contraseña de aplicación**:
+   - Ve a [Google Account Settings](https://myaccount.google.com/)
+   - Seguridad → Verificación en 2 pasos → Contraseñas de aplicaciones
+   - Genera una nueva contraseña para "Correo"
+   - Usa esta contraseña en `SMTP_PASSWORD` (no tu contraseña regular)
+
+**Otros proveedores SMTP:**
+
+- **Outlook/Hotmail**: `smtp-mail.outlook.com:587`
+- **Yahoo**: `smtp.mail.yahoo.com:587`
+- **Servidor personalizado**: Configura `SMTP_SERVER` y `SMTP_PORT` según tu proveedor
+
+#### Usando SendGrid
+
+Para usar SendGrid como proveedor de email:
+
+```bash
+# Seleccionar SendGrid como proveedor
+EMAIL_PROVIDER=sendgrid
+
+# Configuración SendGrid
+SENDGRID_API_KEY=tu-api-key-de-sendgrid
+SENDGRID_FROM_EMAIL=noreply@tudominio.com
+SENDGRID_FROM_NAME=DflayerApi
+```
+
+**Obtener API Key de SendGrid:**
+
+1. Crea una cuenta en [SendGrid](https://sendgrid.com/)
+2. Ve a Settings → API Keys
+3. Crea una nueva API Key con permisos de "Mail Send"
+4. Copia la API Key y úsala en `SENDGRID_API_KEY`
+
+#### Servicio Unificado
+
+El sistema usa automáticamente el proveedor configurado en `EMAIL_PROVIDER`. El servicio unificado (`UnifiedEmailService`) selecciona automáticamente entre SMTP y SendGrid según tu configuración.
+
+**Archivos relacionados:**
+- `app/services/email_smtp_service.py` - Servicio SMTP
+- `app/services/email_service.py` - Servicio SendGrid
+- `app/services/email_service_factory.py` - Factory para selección automática
+
 ## 📖 Endpoints Principales
 
 ### Health Check

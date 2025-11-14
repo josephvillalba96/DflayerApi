@@ -1,6 +1,14 @@
 """
-Authentication Service
-Handles user registration, login, email verification, 2FA, and password reset
+Servicio de Autenticación (HU001, HU002)
+
+Este servicio maneja todas las operaciones relacionadas con la autenticación de usuarios:
+- Registro de nuevos usuarios con verificación de email
+- Inicio de sesión con autenticación de dos factores (2FA)
+- Verificación de correo electrónico
+- Restablecimiento de contraseña
+- Gestión de sesiones con tokens JWT
+
+Historia de Usuario: HU001 (Registro), HU002 (Autenticación Segura)
 """
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
@@ -19,7 +27,7 @@ from app.models.two_factor_auth import TwoFactorAuth, TwoFactorCode
 from app.models.password_reset import PasswordReset
 from app.core.security import get_password_hash, verify_password, create_access_token
 from app.core.config import settings
-from app.services.email_service import EmailService
+from app.services.email_service_factory import UnifiedEmailService
 from app.schemas.auth import (
     UserRegisterRequest, UserLoginRequest, EmailVerificationRequest,
     TwoFactorSetupRequest, TwoFactorVerifyRequest, PasswordResetRequest,
@@ -28,16 +36,55 @@ from app.schemas.auth import (
 
 
 class AuthService:
-    """Service for authentication operations"""
+    """
+    Servicio de Autenticación
+    
+    Proporciona métodos para gestionar el registro, inicio de sesión, verificación de email,
+    autenticación de dos factores y restablecimiento de contraseña.
+    
+    Características principales:
+    - Registro automático con creación de sesión inmediata
+    - Verificación de email obligatoria
+    - Soporte para autenticación de dos factores (TOTP)
+    - Restablecimiento seguro de contraseña
+    - Gestión de tokens JWT para sesiones
+    """
     
     def __init__(self, db: Session):
+        """
+        Inicializa el servicio de autenticación
+        
+        Args:
+            db: Sesión de base de datos SQLAlchemy
+        """
         self.db = db
     
     # Registration
     def register_user(self, user_data: UserRegisterRequest):
         """
-        Register a new user
-        Returns: (User, verification_token)
+        Registra un nuevo usuario en el sistema (HU001)
+        
+        Este método realiza las siguientes operaciones:
+        1. Valida que el email y username no existan
+        2. Crea el usuario con nivel 1 automáticamente
+        3. Genera un token de verificación de email (válido por 7 días)
+        4. Crea una sesión inmediata (retorna token de acceso)
+        5. Envía correo de verificación automáticamente
+        
+        Args:
+            user_data: Datos del usuario a registrar (email, password, name, username, user_type)
+        
+        Returns:
+            Tupla con (User, verification_token, access_token)
+            - User: Objeto del usuario creado
+            - verification_token: Token para verificar el email
+            - access_token: Token JWT para autenticación inmediata
+        
+        Raises:
+            ValueError: Si el email o username ya existen, o si el user_type es inválido
+        
+        Nota: El usuario queda en sesión activa después del registro, pero debe verificar
+        su email para acceder a funcionalidades completas.
         """
         # Check if email already exists
         existing_user = self.db.query(User).filter(User.email == user_data.email).first()
@@ -49,13 +96,17 @@ class AuthService:
         if existing_username:
             raise ValueError("Username already taken")
         
+        # User type is always CLIENT for new registrations
+        # Only administrators can change user_type after registration
+        user_type = UserType.CLIENT
+        
         # Create user
         user = User(
             email=user_data.email,
             password=get_password_hash(user_data.password),
             name=user_data.name,
             username=user_data.username,
-            user_type=UserType[user_data.user_type.upper()],
+            user_type=user_type,
             level=1,  # HU001: Asignación automática como Usuario Nivel 1
             email_verified=False,
             is_active=True
@@ -76,15 +127,34 @@ class AuthService:
         self.db.commit()
         self.db.refresh(user)
         
+        # Generate access token immediately (automatic session)
+        access_token = create_access_token(
+            data={"sub": str(user.user_id), "email": user.email}
+        )
+        
         # Send verification email
-        email_service = EmailService()
+        email_service = UnifiedEmailService()
         email_service.send_verification_email(user.email, user.name, verification_token)
         
-        return (user, verification_token)
+        return (user, verification_token, access_token)
     
     # Login
     def authenticate_user(self, email: str, password: str) -> Optional[User]:
-        """Authenticate user with email and password"""
+        """
+        Autentica un usuario con email y contraseña
+        
+        Verifica las credenciales del usuario y retorna el objeto User si son válidas.
+        
+        Args:
+            email: Correo electrónico del usuario
+            password: Contraseña en texto plano (se verifica contra el hash almacenado)
+        
+        Returns:
+            Objeto User si las credenciales son válidas, None en caso contrario
+        
+        Raises:
+            ValueError: Si la cuenta está desactivada
+        """
         user = self.db.query(User).filter(User.email == email).first()
         if not user:
             return None
@@ -99,8 +169,31 @@ class AuthService:
     
     def login_user(self, login_data: UserLoginRequest) -> dict:
         """
-        Login user and return tokens
-        Returns: dict with access_token and user info
+        Inicia sesión de usuario y retorna tokens (HU002)
+        
+        Proceso de autenticación:
+        1. Verifica email y contraseña
+        2. Si el usuario tiene 2FA habilitado:
+           - Si no se proporciona código 2FA, retorna flag two_factor_required
+           - Si se proporciona código, lo valida
+        3. Genera token JWT de acceso
+        
+        Args:
+            login_data: Datos de login (email, password, two_factor_code opcional)
+        
+        Returns:
+            Diccionario con:
+            - access_token: Token JWT para autenticación
+            - token_type: Tipo de token ("bearer")
+            - expires_in: Tiempo de expiración en segundos
+            - user_id: ID del usuario
+            - email: Email del usuario
+            - user_type: Tipo de usuario
+            - email_verified: Estado de verificación de email
+            - two_factor_required: True si se requiere código 2FA
+        
+        Raises:
+            ValueError: Si las credenciales son inválidas o el código 2FA es incorrecto
         """
         user = self.authenticate_user(login_data.email, login_data.password)
         if not user:
@@ -141,7 +234,18 @@ class AuthService:
     
     # Email Verification
     def verify_email(self, token: str) -> bool:
-        """Verify user email with token"""
+        """
+        Verifica el correo electrónico del usuario con un token (HU001)
+        
+        Valida el token de verificación y marca el email como verificado.
+        Los tokens expiran después de 7 días.
+        
+        Args:
+            token: Token de verificación recibido por email
+        
+        Returns:
+            True si la verificación fue exitosa, False si el token es inválido o expiró
+        """
         verification = self.db.query(EmailVerification).filter(
             and_(
                 EmailVerification.token == token,
@@ -166,7 +270,21 @@ class AuthService:
         return True
     
     def resend_verification_email(self, email: str) -> str:
-        """Resend verification email"""
+        """
+        Reenvía el correo de verificación (HU001)
+        
+        Genera un nuevo token de verificación y envía un nuevo correo electrónico.
+        El token anterior se invalida automáticamente.
+        
+        Args:
+            email: Correo electrónico del usuario
+        
+        Returns:
+            Nuevo token de verificación generado
+        
+        Raises:
+            ValueError: Si el usuario no existe o el email ya está verificado
+        """
         user = self.db.query(User).filter(User.email == email).first()
         if not user:
             raise ValueError("User not found")
@@ -194,14 +312,40 @@ class AuthService:
         self.db.commit()
         
         # Send verification email
-        email_service = EmailService()
+        email_service = UnifiedEmailService()
         email_service.send_verification_email(user.email, user.name, verification_token)
         
         return verification_token
     
     # Two Factor Authentication
     def setup_2fa(self, user_id: int, password: str) -> dict:
-        """Setup 2FA for user"""
+        """
+        Configura la autenticación de dos factores (2FA) para un usuario (HU002)
+        
+        Proceso:
+        1. Verifica la contraseña del usuario
+        2. Genera una clave secreta única (TOTP)
+        3. Genera 10 códigos de respaldo
+        4. Crea un código QR para escanear con aplicación autenticadora
+        5. El 2FA NO se habilita automáticamente (requiere verificación)
+        
+        Args:
+            user_id: ID del usuario
+            password: Contraseña del usuario para confirmar identidad
+        
+        Returns:
+            Diccionario con:
+            - secret_key: Clave secreta para configuración manual
+            - qr_code_url: URL del código QR en formato data URI (base64)
+            - backup_codes: Lista de 10 códigos de respaldo (guardar de forma segura)
+        
+        Raises:
+            ValueError: Si el usuario no existe, la contraseña es incorrecta,
+                       o el 2FA ya está habilitado
+        
+        Nota: El usuario debe usar verify_2fa_setup() con un código de la app
+        para habilitar el 2FA después de escanear el QR.
+        """
         user = self.db.query(User).filter(User.user_id == user_id).first()
         if not user:
             raise ValueError("User not found")
@@ -263,7 +407,19 @@ class AuthService:
         }
     
     def verify_2fa_setup(self, user_id: int, code: str) -> bool:
-        """Verify 2FA setup with code"""
+        """
+        Verifica y habilita el 2FA usando un código de la aplicación autenticadora (HU002)
+        
+        Valida que el usuario haya configurado correctamente su app autenticadora
+        y habilita permanentemente el 2FA para la cuenta.
+        
+        Args:
+            user_id: ID del usuario
+            code: Código de 6 dígitos generado por la aplicación autenticadora
+        
+        Returns:
+            True si el código es válido y el 2FA fue habilitado, False en caso contrario
+        """
         two_factor = self.db.query(TwoFactorAuth).filter(
             TwoFactorAuth.user_id == user_id
         ).first()
@@ -280,7 +436,19 @@ class AuthService:
         return False
     
     def verify_2fa_code(self, user_id: int, code: str) -> bool:
-        """Verify 2FA code for login"""
+        """
+        Verifica un código 2FA durante el login (HU002)
+        
+        Acepta tanto códigos TOTP de la aplicación autenticadora como códigos de respaldo.
+        Los códigos de respaldo se consumen al usarse (no se pueden reutilizar).
+        
+        Args:
+            user_id: ID del usuario
+            code: Código 2FA (TOTP de 6 dígitos o código de respaldo)
+        
+        Returns:
+            True si el código es válido, False en caso contrario
+        """
         two_factor = self.db.query(TwoFactorAuth).filter(
             and_(
                 TwoFactorAuth.user_id == user_id,
@@ -312,7 +480,24 @@ class AuthService:
         return False
     
     def disable_2fa(self, user_id: int, password: str, code: str) -> bool:
-        """Disable 2FA for user"""
+        """
+        Deshabilita la autenticación de dos factores (HU002)
+        
+        Requiere tanto la contraseña como un código 2FA válido para prevenir
+        deshabilitación no autorizada.
+        
+        Args:
+            user_id: ID del usuario
+            password: Contraseña del usuario
+            code: Código 2FA o código de respaldo
+        
+        Returns:
+            True si el 2FA fue deshabilitado exitosamente
+        
+        Raises:
+            ValueError: Si el usuario no existe, la contraseña es incorrecta,
+                       o el código 2FA es inválido
+        """
         user = self.db.query(User).filter(User.user_id == user_id).first()
         if not user:
             raise ValueError("User not found")
@@ -336,7 +521,22 @@ class AuthService:
     
     # Password Reset
     def request_password_reset(self, email: str) -> str:
-        """Request password reset"""
+        """
+        Solicita el restablecimiento de contraseña (HU002)
+        
+        Genera un token de restablecimiento válido por 24 horas y envía un correo
+        electrónico con el enlace para restablecer la contraseña.
+        
+        Por seguridad, este método siempre retorna un valor (incluso si el email
+        no existe) para prevenir enumeración de emails.
+        
+        Args:
+            email: Correo electrónico de la cuenta
+        
+        Returns:
+            Token de restablecimiento si el email existe, None en caso contrario
+            (pero siempre se envía el correo si el usuario existe)
+        """
         user = self.db.query(User).filter(User.email == email).first()
         if not user:
             # Don't reveal if user exists
@@ -355,13 +555,26 @@ class AuthService:
         self.db.commit()
         
         # Send password reset email
-        email_service = EmailService()
+        email_service = UnifiedEmailService()
         email_service.send_password_reset_email(user.email, user.name, reset_token)
         
         return reset_token
     
     def reset_password(self, token: str, new_password: str) -> bool:
-        """Reset password with token"""
+        """
+        Restablece la contraseña usando un token válido (HU002)
+        
+        Valida el token de restablecimiento y actualiza la contraseña del usuario.
+        El token solo puede usarse una vez y expira después de 24 horas.
+        
+        Args:
+            token: Token de restablecimiento recibido por email
+            new_password: Nueva contraseña (se hashea automáticamente)
+        
+        Returns:
+            True si la contraseña fue restablecida exitosamente, False si el token
+            es inválido, expiró o ya fue usado
+        """
         reset = self.db.query(PasswordReset).filter(
             and_(
                 PasswordReset.token == token,

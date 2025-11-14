@@ -33,6 +33,18 @@ class Settings(BaseSettings):
     SENDGRID_FROM_EMAIL: Optional[str] = None
     SENDGRID_FROM_NAME: Optional[str] = None
     
+    # SMTP (Email - Gmail compatible)
+    SMTP_SERVER: Optional[str] = None  # e.g., smtp.gmail.com
+    SMTP_PORT: Optional[int] = None  # e.g., 587 for TLS, 465 for SSL
+    SMTP_USERNAME: Optional[str] = None  # Your email address
+    SMTP_PASSWORD: Optional[str] = None  # Your email password or App Password
+    SMTP_FROM_EMAIL: Optional[str] = None  # From email address
+    SMTP_FROM_NAME: Optional[str] = None  # From name
+    SMTP_USE_TLS: bool = True  # Use TLS encryption
+    
+    # Email Provider Selection
+    EMAIL_PROVIDER: str = "smtp"  # Options: "smtp" or "sendgrid"
+    
     # AWS S3
     AWS_ACCESS_KEY_ID: Optional[str] = None
     AWS_SECRET_ACCESS_KEY: Optional[str] = None
@@ -49,6 +61,15 @@ class Settings(BaseSettings):
     
     # Frontend URL (for email links)
     FRONTEND_URL: Optional[str] = None
+    
+    # PostgreSQL (for Docker)
+    POSTGRES_USER: Optional[str] = None
+    POSTGRES_PASSWORD: Optional[str] = None
+    POSTGRES_DB: Optional[str] = None
+    POSTGRES_PORT: Optional[int] = None
+    
+    # API Port (for Docker)
+    API_PORT: Optional[int] = None
     
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod

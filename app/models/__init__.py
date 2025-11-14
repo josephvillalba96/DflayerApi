@@ -38,6 +38,7 @@ from app.models.multiplier_plan import MultiplierPlan, UserPlan
 from app.models.notification import Notification, NotificationType
 from app.models.feed_item import FeedItem
 from app.models.user_preferences import UserPreferences, UserCategory
+from app.models.user_upgrade import UserUpgradeRequest, UpgradeRequestStatus
 from app.models.event_fund import EventFund
 from app.models.advertising_campaign import AdvertisingCampaign, SalesCommission
 from app.models.email_verification import EmailVerification
