@@ -17,34 +17,31 @@ from app.core.config import settings
 from app.models.base import Base
 
 # Import all models to ensure they are registered with Base.metadata
-from app.models.location import Location
+# Models removed: Location, Category, ContentCategory, Hashtag, ContentHashtag, 
+# ContentMetrics, TranscodingJob, MonetizableAction, FeedItem (not in spec)
 from app.models.tax_data import TaxData
 from app.models.user import User
-from app.models.category import Category
+from app.models.email_verification import EmailVerification
+from app.models.password_reset import PasswordReset
+from app.models.two_factor_auth import TwoFactorAuth
+from app.models.sms_verification import SMSVerification
 from app.models.content import Content
-from app.models.hashtag import Hashtag, ContentHashtag
-from app.models.content_metrics import ContentMetrics
-from app.models.multimedia_file import MultimediaFile, FileVersion
-from app.models.transcoding_job import (
-    TranscodingJob, TranscodingProfile, TranscodingQueue, TranscodingLog
-)
+from app.models.post_hashtag import PostHashtag
+from app.models.multimedia_file import MultimediaFile
+from app.models.video_transcode import VideoTranscode
+from app.models.image_variant import ImageVariant
+from app.models.audio_track import AudioTrack
 from app.models.follow import Follow
 from app.models.like import Like
 from app.models.comment import Comment
-from app.models.monetizable_action import MonetizableAction
 from app.models.interaction import Interaction
 from app.models.transaction import Transaction
 from app.models.payment_distribution import PaymentDistribution, DistributionLevel
-from app.models.voucher import Voucher
-from app.models.multiplier_plan import MultiplierPlan, UserPlan
+from app.models.voucher import Bono  # Voucher is alias, not in spec
+from app.models.multiplier_plan import MembershipPlan, UserMembership  # MultiplierPlan/UserPlan are aliases
 from app.models.notification import Notification
-from app.models.feed_item import FeedItem
-from app.models.user_preferences import UserPreferences, UserCategory
 from app.models.event_fund import EventFund
 from app.models.advertising_campaign import AdvertisingCampaign, SalesCommission
-from app.models.email_verification import EmailVerification
-from app.models.two_factor_auth import TwoFactorAuth, TwoFactorCode
-from app.models.password_reset import PasswordReset
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

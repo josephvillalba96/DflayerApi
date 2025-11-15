@@ -1,35 +1,52 @@
 """
-Voucher Model
+Bono Model (BONOS)
 """
-from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Float, Boolean, Date, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from datetime import datetime
-import enum
 from app.models.base import Base
 
 
-class VoucherStatus(str, enum.Enum):
-    """Enum for voucher status"""
-    ACTIVE = "active"
-    REDEEMED = "redeemed"
-    EXPIRED = "expired"
+class Bono(Base):
+    """Digital voucher model (BONOS)"""
+    __tablename__ = "bonos"  # vouchers en legacy
 
-
-class Voucher(Base):
-    """Digital voucher model"""
-    __tablename__ = "vouchers"
-
-    voucher_id = Column(Integer, primary_key=True, index=True)
-    merchant_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
-    transaction_id = Column(Integer, ForeignKey("transactions.transaction_id"), nullable=True, unique=True)
-    value = Column(Float, nullable=False)
-    qr_code = Column(String(255), unique=True, nullable=False, index=True)
-    status = Column(SQLEnum(VoucherStatus), default=VoucherStatus.ACTIVE)
+    bono_id = Column(Integer, primary_key=True, index=True)  # voucher_id en legacy
+    comercio_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)  # merchant_id en legacy
+    bono_name = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    original_price = Column(Float, nullable=False)  # DECIMAL
+    discount_price = Column(Float, nullable=False)  # DECIMAL
+    discount_percentage = Column(Float, nullable=False)  # DECIMAL
+    category = Column(String(100), nullable=True)
+    terms_and_conditions = Column(Text, nullable=True)
+    stock_total = Column(Integer, nullable=False)
+    stock_available = Column(Integer, nullable=False)
+    valid_from = Column(Date, nullable=False)
+    valid_until = Column(Date, nullable=True)
+    is_active = Column(Boolean, default=True)
     created_at = Column(Date, default=datetime.utcnow)
-    expires_at = Column(Date, nullable=True)
+    updated_at = Column(Date, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Legacy fields (kept for compatibility)
+    merchant_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)  # Legacy
+    transaction_id = Column(Integer, ForeignKey("transactions.transaction_id"), nullable=True)  # Legacy
+    value = Column(Float, nullable=True)  # Legacy
+    qr_code = Column(String(255), nullable=True)  # Legacy - ahora en BONO_CODES
+    status = Column(String(50), nullable=True)  # Legacy - ahora en BONO_CODES
+    expires_at = Column(Date, nullable=True)  # Legacy - use valid_until
 
     # Relationships
-    merchant = relationship("User", back_populates="vouchers")
-    transaction = relationship("Transaction", back_populates="voucher", uselist=False)
-    sales_commissions = relationship("SalesCommission", back_populates="voucher")
+    comercio = relationship("User", foreign_keys=[comercio_id], back_populates="bonos")
+    images = relationship("BonoImage", back_populates="bono")
+    purchases = relationship("BonoPurchase", back_populates="bono")
+    
+    # Legacy relationships
+    # merchant relationship removed - vouchers relationship doesn't exist in User model
+    transaction = relationship("Transaction", back_populates="voucher", uselist=False)  # Legacy
+    sales_commissions = relationship("SalesCommission", back_populates="voucher")  # Legacy
+
+# Legacy alias
+Voucher = Bono
+VoucherStatus = None  # Deprecated - use redemption_status in BonoCode
 

@@ -7,7 +7,6 @@ from typing import List, Optional
 from datetime import datetime
 
 from app.models.user import User, UserType
-from app.models.user_upgrade import UserUpgradeRequest, UpgradeRequestStatus
 from app.schemas.admin_user import ChangeUserTypeRequest
 
 
@@ -16,13 +15,15 @@ class AdminUserService:
     Servicio Administrativo de Gestión de Usuarios
     
     Proporciona métodos para que los administradores gestionen tipos de usuario.
-    Solo usuarios con tipo 'admin' pueden usar estos métodos.
+    Solo usuarios con tipo 'admin' pueden cambiar tipos de usuario.
+    
+    NOTA: Solo existen 2 tipos de usuario: 'admin' y 'usuario'.
+    Todos los usuarios tienen las mismas funcionalidades (crear contenido, campañas, bonos).
+    is_business_account es solo visual, no funcional.
     
     Características:
-    - Cambiar tipo de usuario de cualquier usuario
-    - Crear nuevos administradores (a partir de cualquier tipo de usuario)
-    - Aprobar/rechazar solicitudes de upgrade
-    - Listar solicitudes de upgrade pendientes
+    - Cambiar tipo de usuario de cualquier usuario (solo admin)
+    - Crear nuevos administradores (solo admin, a partir de cualquier usuario)
     """
     
     def __init__(self, db: Session):
@@ -42,14 +43,14 @@ class AdminUserService:
         reason: Optional[str] = None
     ) -> User:
         """
-        Cambia el tipo de usuario de cualquier usuario (Solo administradores)
+        Cambia el tipo de usuario de cualquier usuario (Solo admin)
         
-        Puede cambiar cualquier usuario (client, merchant, affiliate) a cualquier tipo,
-        incluyendo crear nuevos administradores.
+        Puede cambiar cualquier usuario a 'usuario' o 'admin'.
+        Solo admin puede cambiar tipos de usuario.
         
         Args:
             target_user_id: ID del usuario cuyo tipo se va a cambiar
-            new_user_type: Nuevo tipo de usuario ('client', 'merchant', 'affiliate', 'admin')
+            new_user_type: Nuevo tipo de usuario ('usuario', 'admin')
             admin_user_id: ID del administrador que realiza el cambio
             reason: Razón del cambio (opcional, para auditoría)
         
@@ -57,7 +58,7 @@ class AdminUserService:
             Objeto User actualizado
         
         Raises:
-            ValueError: Si el usuario objetivo no existe, el admin no es válido,
+            ValueError: Si el usuario objetivo no existe, el admin no es admin,
                        o el nuevo tipo de usuario es inválido
         """
         # Verify admin user
@@ -76,81 +77,52 @@ class AdminUserService:
         
         # Validate new user type
         try:
-            new_type = UserType[new_user_type.upper()]
-        except KeyError:
-            raise ValueError(
-                f"Invalid user_type. Must be one of: {', '.join([t.value for t in UserType])}"
-            )
-        
-        # Store previous type before updating
-        previous_type = target_user.user_type.value
+            new_type = UserType[new_user_type.upper()] if new_user_type.upper() == "ADMIN" else UserType.USER
+        except (KeyError, AttributeError):
+            # Handle "usuario" as USER
+            if new_user_type.lower() in ["usuario", "user"]:
+                new_type = UserType.USER
+            elif new_user_type.lower() == "admin":
+                new_type = UserType.ADMIN
+            else:
+                raise ValueError(
+                    f"Invalid user_type. Must be one of: {', '.join([t.value for t in UserType])}"
+                )
         
         # Update user type
         target_user.user_type = new_type
-        
-        # If there's a pending upgrade request for this user, mark it as processed
-        upgrade_request = self.db.query(UserUpgradeRequest).filter(
-            UserUpgradeRequest.user_id == target_user_id,
-            UserUpgradeRequest.status == UpgradeRequestStatus.PENDING
-        ).first()
-        
-        if upgrade_request:
-            # If changing to the requested type, approve it
-            if new_type.value == upgrade_request.requested_user_type:
-                upgrade_request.status = UpgradeRequestStatus.APPROVED
-                upgrade_request.reviewed_by = admin_user_id
-                upgrade_request.reviewed_at = datetime.utcnow()
-            # Otherwise, reject it
-            else:
-                upgrade_request.status = UpgradeRequestStatus.REJECTED
-                upgrade_request.reviewed_by = admin_user_id
-                upgrade_request.reviewed_at = datetime.utcnow()
-                upgrade_request.rejection_reason = f"User type changed to {new_type.value} by admin"
         
         self.db.commit()
         self.db.refresh(target_user)
         
         return target_user
     
-    def get_all_upgrade_requests(
+    def create_admin(
         self,
-        status: Optional[str] = None,
-        skip: int = 0,
-        limit: int = 100
-    ) -> List[UserUpgradeRequest]:
+        user_id: int,
+        admin_id: int,
+        reason: Optional[str] = None
+    ) -> User:
         """
-        Obtiene todas las solicitudes de upgrade (Solo administradores)
+        Crea un nuevo administrador a partir de cualquier usuario (Solo admin)
+        
+        Método específico para crear administradores. Solo admin puede ejecutar esta acción.
         
         Args:
-            status: Filtrar por estado ('pending', 'approved', 'rejected'). None para todas
-            skip: Número de registros a omitir (paginación)
-            limit: Número máximo de registros a retornar
+            user_id: ID del usuario a convertir en administrador
+            admin_id: ID del administrador que realiza la acción
+            reason: Razón de la promoción (opcional, para auditoría)
         
         Returns:
-            Lista de objetos UserUpgradeRequest
+            Objeto User actualizado con tipo 'admin'
+        
+        Raises:
+            ValueError: Si el usuario no existe o el admin no es válido
         """
-        query = self.db.query(UserUpgradeRequest)
-        
-        if status:
-            try:
-                status_enum = UpgradeRequestStatus[status.upper()]
-                query = query.filter(UserUpgradeRequest.status == status_enum)
-            except KeyError:
-                pass
-        
-        return query.order_by(UserUpgradeRequest.created_at.desc()).offset(skip).limit(limit).all()
-    
-    def get_upgrade_request(self, upgrade_request_id: int) -> Optional[UserUpgradeRequest]:
-        """
-        Obtiene una solicitud de upgrade por ID
-        
-        Args:
-            upgrade_request_id: ID de la solicitud
-        
-        Returns:
-            Objeto UserUpgradeRequest si existe, None en caso contrario
-        """
-        return self.db.query(UserUpgradeRequest).filter(
-            UserUpgradeRequest.upgrade_request_id == upgrade_request_id
-        ).first()
+        return self.change_user_type(
+            target_user_id=user_id,
+            new_user_type="admin",
+            admin_user_id=admin_id,
+            reason=reason
+        )
 

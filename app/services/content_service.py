@@ -12,11 +12,10 @@ Historia de Usuario: HU006 (Crear Publicación)
 """
 from sqlalchemy.orm import Session
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from app.models.content import Content, ContentType, Visibility
-from app.models.user import User
-from app.models.hashtag import Hashtag, ContentHashtag
-from app.models.category import Category
+from app.models.user import User, UserType
+from app.models.post_hashtag import PostHashtag
 from app.schemas.content import ContentCreateRequest, ContentUpdateRequest
 
 
@@ -25,7 +24,7 @@ class ContentService:
     Servicio de Gestión de Contenido
     
     Proporciona métodos para crear, actualizar, consultar y eliminar contenido.
-    Todos los usuarios autenticados pueden crear contenido (client, merchant, affiliate, admin).
+    TODOS los usuarios (admin y usuario) pueden crear contenido. No hay restricciones basadas en user_type.
     
     Características:
     - Soporte para múltiples tipos de contenido (video, imagen, audio, texto)
@@ -47,7 +46,8 @@ class ContentService:
         """
         Crea una nueva publicación de contenido (HU006)
         
-        Todos los usuarios autenticados pueden crear contenido.
+        TODOS los usuarios (admin y usuario) pueden crear contenido.
+        No hay restricciones basadas en user_type.
         
         Proceso:
         1. Verifica que el usuario existe
@@ -74,18 +74,26 @@ class ContentService:
         if not user:
             raise ValueError("User not found")
         
-        # All users can create content (client, merchant, affiliate, admin)
-        # No restriction on user_type for content creation
+        # TODOS los usuarios pueden crear contenido - no hay restricciones de tipo
         
         # Determine publish date
         published_at = None
         if content_data.scheduled_publish_at:
-            if content_data.scheduled_publish_at > datetime.utcnow():
-                published_at = content_data.scheduled_publish_at
+            # Use timezone-aware datetime for comparison
+            now_utc = datetime.now(timezone.utc)
+            # If scheduled_publish_at is naive, make it aware (assume UTC)
+            scheduled = content_data.scheduled_publish_at
+            if scheduled.tzinfo is None:
+                scheduled = scheduled.replace(tzinfo=timezone.utc)
+            
+            if scheduled > now_utc:
+                published_at = scheduled
             else:
-                published_at = datetime.utcnow()
+                # If scheduled time is in the past, publish immediately
+                published_at = now_utc
         else:
-            published_at = datetime.utcnow()
+            # Publish immediately if no scheduled time
+            published_at = datetime.now(timezone.utc)
         
         # Create content
         content = Content(
@@ -97,7 +105,7 @@ class ContentService:
             thumbnail_url=content_data.thumbnail_url,
             visibility=Visibility[content_data.visibility.upper()],
             allow_comments=content_data.allow_comments,
-            location_id=content_data.location_id,
+            location=content_data.location if hasattr(content_data, 'location') else None,
             published_at=published_at,
             active=True
         )
@@ -105,12 +113,9 @@ class ContentService:
         self.db.add(content)
         self.db.flush()
         
-        # Handle hashtags
+        # Handle hashtags (POST_HASHTAGS from spec)
         if content_data.hashtags:
             self._add_hashtags(content.content_id, content_data.hashtags)
-        
-        # Handle categories (if category relationship exists)
-        # Note: This would require a ContentCategory join table if not already implemented
         
         self.db.commit()
         self.db.refresh(content)
@@ -119,41 +124,33 @@ class ContentService:
     
     def _add_hashtags(self, content_id: int, hashtags: List[str]):
         """
-        Agrega hashtags a un contenido
+        Agrega hashtags a un contenido (POST_HASHTAGS from spec)
         
-        Crea los hashtags si no existen y los asocia al contenido.
+        Los hashtags se almacenan directamente como VARCHAR en POST_HASHTAGS.
         Los hashtags se normalizan (se elimina el # y se convierte a minúsculas).
         
         Args:
-            content_id: ID del contenido
+            content_id: ID del contenido (post_id)
             hashtags: Lista de hashtags (pueden incluir o no el símbolo #)
         """
         for tag_name in hashtags:
-            # Remove # if present
+            # Remove # if present and normalize
             tag_clean = tag_name.lstrip('#').lower()
             
-            # Find or create hashtag
-            hashtag = self.db.query(Hashtag).filter(
-                Hashtag.name == tag_clean
-            ).first()
-            
-            if not hashtag:
-                hashtag = Hashtag(name=tag_clean)
-                self.db.add(hashtag)
-                self.db.flush()
-            
-            # Check if relationship already exists
-            existing = self.db.query(ContentHashtag).filter(
-                ContentHashtag.content_id == content_id,
-                ContentHashtag.hashtag_id == hashtag.hashtag_id
+            # Check if this hashtag already exists for this post
+            existing = self.db.query(PostHashtag).filter(
+                PostHashtag.post_id == content_id,
+                PostHashtag.hashtag == tag_clean
             ).first()
             
             if not existing:
-                content_hashtag = ContentHashtag(
-                    content_id=content_id,
-                    hashtag_id=hashtag.hashtag_id
+                post_hashtag = PostHashtag(
+                    post_id=content_id,
+                    hashtag=tag_clean
                 )
-                self.db.add(content_hashtag)
+                self.db.add(post_hashtag)
+        
+        self.db.flush()
     
     def update_content(self, content_id: int, merchant_id: int, content_data: ContentUpdateRequest) -> Content:
         """

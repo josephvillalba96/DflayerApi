@@ -13,15 +13,12 @@ Historia de Usuario: HU007 (Feed Principal)
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func, desc
 from typing import List, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.models.content import Content, Visibility, ContentType
 from app.models.user import User
-from app.models.user_preferences import UserPreferences, UserCategory
-from app.models.category import Category
-from app.models.location import Location
+# UserPreferences, UserCategory removed - not in spec
 from app.models.follow import Follow
-from app.models.content_metrics import ContentMetrics
 from app.models.like import Like
 from app.models.comment import Comment
 
@@ -49,34 +46,23 @@ class FeedService:
         """
         self.db = db
     
-    def get_user_preferences(self, user_id: int) -> Optional[UserPreferences]:
+    def get_user_preferences(self, user_id: int) -> Optional[dict]:
         """
-        Obtiene las preferencias del usuario incluyendo algoritmo preferido
-        
-        Args:
-            user_id: ID del usuario
-        
-        Returns:
-            Objeto UserPreferences si existe, None en caso contrario
+        NOTA: UserPreferences model removed - not in spec
+        Returns default preferences
         """
-        return self.db.query(UserPreferences).filter(
-            UserPreferences.user_id == user_id
-        ).first()
+        return {
+            "algorithm_preference": "recommended",
+            "push_notifications": True,
+            "email_notifications": True
+        }
     
     def get_user_interests(self, user_id: int) -> List[int]:
         """
-        Obtiene la lista de IDs de categorías de interés del usuario
-        
-        Args:
-            user_id: ID del usuario
-        
-        Returns:
-            Lista de IDs de categorías que el usuario ha marcado como interés
+        NOTA: UserCategory model removed - not in spec
+        Returns empty list
         """
-        user_categories = self.db.query(UserCategory).filter(
-            UserCategory.user_id == user_id
-        ).all()
-        return [uc.category_id for uc in user_categories]
+        return []
     
     def get_followed_users(self, user_id: int) -> List[int]:
         """
@@ -236,23 +222,25 @@ class FeedService:
         """
         # Get user preferences
         preferences = self.get_user_preferences(user_id)
-        if preferences and preferences.algorithm_preference:
-            algorithm = preferences.algorithm_preference
+        if preferences and preferences.get("algorithm_preference"):
+            algorithm = preferences["algorithm_preference"]
         
-        # Base query: only public, active content
+        # Base query: only public, active, and published content
+        now_utc = datetime.now(timezone.utc)
         query = self.db.query(Content).filter(
             Content.visibility == Visibility.PUBLIC,
-            Content.active == True
+            Content.active == True,
+            Content.published_at.isnot(None),
+            Content.published_at <= now_utc
         )
         
         # Apply filters
-        if category_id:
-            # Note: This assumes content has categories. If not implemented yet, this filter won't work
-            # For now, we'll skip this filter if categories aren't linked to content
-            pass
-        
+        # Note: Category filtering removed as categories are not in the spec
+        # Location filtering removed as location is VARCHAR, not FK
         if location_id:
-            query = query.filter(Content.location_id == location_id)
+            # Location is now VARCHAR, so we can't filter by location_id
+            # If needed, implement text-based location filtering
+            pass
         
         # Apply algorithm-specific logic
         if algorithm == "following":
@@ -265,11 +253,12 @@ class FeedService:
                 algorithm = "recommended"
         
         if algorithm == "trending":
-            # Order by engagement score
-            # Join with metrics to calculate engagement
-            query = query.join(ContentMetrics, Content.content_id == ContentMetrics.content_id, isouter=True)
-            # We'll calculate engagement in Python after fetching
-            query = query.order_by(desc(Content.published_at))
+            # Order by engagement score using denormalized counters
+            # Metrics are in CONTENT_POSTS (view_count, like_count, etc.)
+            query = query.order_by(
+                desc(Content.view_count + Content.like_count * 2 + Content.comment_count * 3 + Content.share_count * 5),
+                desc(Content.published_at)
+            )
         
         elif algorithm == "recent":
             # Order by publication date (newest first)
@@ -293,13 +282,11 @@ class FeedService:
             # Calculate relevance scores and sort
             contents_with_scores = []
             for content in contents:
-                # Get content categories (if implemented)
-                content_categories = []  # TODO: Implement content-category relationship
-                
+                # Note: Categories removed from spec, using user interests only
                 relevance = self.calculate_relevance_score(
                     content,
                     user_interests,
-                    content_categories
+                    []  # No content categories
                 )
                 contents_with_scores.append((content, relevance))
             

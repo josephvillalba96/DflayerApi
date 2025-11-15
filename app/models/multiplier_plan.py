@@ -1,36 +1,49 @@
 """
-Multiplier Plan Model
+Membership Plans Model (MEMBERSHIP_PLANS y USER_MEMBERSHIPS)
 """
-from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Boolean, Date, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.models.base import Base
 
 
-class MultiplierPlan(Base):
-    """Earnings multiplier plan model"""
-    __tablename__ = "multiplier_plans"
+class MembershipPlan(Base):
+    """Membership plan model (MEMBERSHIP_PLANS)"""
+    __tablename__ = "membership_plans"  # multiplier_plans en legacy
 
     plan_id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False)
-    price = Column(Float, nullable=False)
-    multiplier_factor = Column(Float, nullable=False)
-
-    # M:N relationship with User (through UserPlan)
-    users = relationship("UserPlan", back_populates="plan")
-
-
-class UserPlan(Base):
-    """Intermediate table for M:N relationship between User and MultiplierPlan"""
-    __tablename__ = "user_plans"
-
-    user_plan_id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
-    plan_id = Column(Integer, ForeignKey("multiplier_plans.plan_id"), nullable=False)
-    purchase_date = Column(Date, nullable=False)
-    expiration_date = Column(Date, nullable=True)
+    plan_name = Column(String(100), nullable=False)
+    price = Column(Float, nullable=False)  # DECIMAL
+    multiplier = Column(Float, nullable=False)  # DECIMAL - 1x, 2x, 3x, etc.
+    duration_days = Column(Integer, nullable=False)  # Duración del plan en días
+    description = Column(String(500), nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(Date, default=datetime.utcnow)
+    updated_at = Column(Date, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    user = relationship("User", back_populates="plans")
-    plan = relationship("MultiplierPlan", back_populates="users")
+    user_memberships = relationship("UserMembership", back_populates="plan")
+
+
+class UserMembership(Base):
+    """User membership model (USER_MEMBERSHIPS)"""
+    __tablename__ = "user_memberships"  # user_plans en legacy
+
+    membership_id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    plan_id = Column(Integer, ForeignKey("membership_plans.plan_id"), nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=True)
+    is_active = Column(Boolean, default=True)
+    payment_reference = Column(String(255), nullable=True)
+    amount_paid = Column(Float, nullable=True)  # DECIMAL
+    created_at = Column(Date, default=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="memberships")
+    plan = relationship("MembershipPlan", back_populates="user_memberships")
+
+# Legacy aliases for backward compatibility
+MultiplierPlan = MembershipPlan
+UserPlan = UserMembership
 

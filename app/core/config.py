@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # Seguridad
     SECRET_KEY: str = "change-this-secret-key-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200  # 30 días (HU002: Sesión activa por 30 días)
     
     # Base de datos
     DATABASE_URL: Optional[str] = None
@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     
     # Email Provider Selection
     EMAIL_PROVIDER: str = "smtp"  # Options: "smtp" or "sendgrid"
+    
+    # SMS Provider Configuration
+    SMS_PROVIDER: str = "twilio"  # Options: "twilio", "aws_sns", etc.
+    TWILIO_ACCOUNT_SID: Optional[str] = None
+    TWILIO_AUTH_TOKEN: Optional[str] = None
+    TWILIO_FROM_NUMBER: Optional[str] = None
     
     # AWS S3
     AWS_ACCESS_KEY_ID: Optional[str] = None

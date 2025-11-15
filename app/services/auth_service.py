@@ -23,8 +23,10 @@ import json
 
 from app.models.user import User, UserType
 from app.models.email_verification import EmailVerification
-from app.models.two_factor_auth import TwoFactorAuth, TwoFactorCode
 from app.models.password_reset import PasswordReset
+from app.models.two_factor_auth import TwoFactorAuth
+from app.models.sms_verification import SMSVerification
+from app.services.sms_service import SMSService
 from app.core.security import get_password_hash, verify_password, create_access_token
 from app.core.config import settings
 from app.services.email_service_factory import UnifiedEmailService
@@ -96,13 +98,20 @@ class AuthService:
         if existing_username:
             raise ValueError("Username already taken")
         
-        # User type is always CLIENT for new registrations
-        # Only administrators can change user_type after registration
-        user_type = UserType.CLIENT
+        # Check if phone_number already exists (if provided)
+        if user_data.phone_number:
+            existing_phone = self.db.query(User).filter(User.phone_number == user_data.phone_number).first()
+            if existing_phone:
+                raise ValueError("Phone number already registered")
+        
+        # User type is always USER (usuario) for new registrations
+        # Only admin can change user_type after registration
+        user_type = UserType.USER
         
         # Create user
         user = User(
             email=user_data.email,
+            phone_number=user_data.phone_number,
             password=get_password_hash(user_data.password),
             name=user_data.name,
             username=user_data.username,
@@ -114,18 +123,19 @@ class AuthService:
         self.db.add(user)
         self.db.flush()  # Get user_id
         
-        # Create email verification token
+        # Generate verification token for email (HU001: valid for 10 minutes)
         verification_token = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(days=7)
+        expires_at = datetime.utcnow() + timedelta(minutes=10)
         
+        # Store verification token in database
         email_verification = EmailVerification(
             user_id=user.user_id,
             token=verification_token,
-            expires_at=expires_at
+            expires_at=expires_at,
+            verified=False
         )
         self.db.add(email_verification)
-        self.db.commit()
-        self.db.refresh(user)
+        self.db.flush()
         
         # Generate access token immediately (automatic session)
         access_token = create_access_token(
@@ -136,26 +146,56 @@ class AuthService:
         email_service = UnifiedEmailService()
         email_service.send_verification_email(user.email, user.name, verification_token)
         
+        # Send SMS verification code if phone_number provided (HU001)
+        sms_code = None
+        if user_data.phone_number:
+            sms_service = SMSService()
+            sms_code = sms_service.generate_code()
+            expires_at_sms = datetime.utcnow() + timedelta(minutes=10)
+            
+            sms_verification = SMSVerification(
+                user_id=user.user_id,
+                phone_number=user_data.phone_number,
+                code=sms_code,
+                expires_at=expires_at_sms,
+                verified=False
+            )
+            self.db.add(sms_verification)
+            self.db.flush()
+            
+            # Send SMS
+            sms_service.send_verification_code(user_data.phone_number, sms_code)
+        
         return (user, verification_token, access_token)
     
     # Login
-    def authenticate_user(self, email: str, password: str) -> Optional[User]:
+    def authenticate_user(self, email: Optional[str] = None, phone_number: Optional[str] = None, password: str = "") -> Optional[User]:
         """
-        Autentica un usuario con email y contraseña
+        Autentica un usuario con email/teléfono y contraseña (HU002)
         
         Verifica las credenciales del usuario y retorna el objeto User si son válidas.
+        Permite autenticación con email o teléfono.
         
         Args:
-            email: Correo electrónico del usuario
+            email: Correo electrónico del usuario (opcional si se proporciona phone_number)
+            phone_number: Número de teléfono del usuario (opcional si se proporciona email)
             password: Contraseña en texto plano (se verifica contra el hash almacenado)
         
         Returns:
             Objeto User si las credenciales son válidas, None en caso contrario
         
         Raises:
-            ValueError: Si la cuenta está desactivada
+            ValueError: Si la cuenta está desactivada o si no se proporciona email ni teléfono
         """
-        user = self.db.query(User).filter(User.email == email).first()
+        if not email and not phone_number:
+            raise ValueError("Either email or phone_number must be provided")
+        
+        # Search by email or phone_number
+        if email:
+            user = self.db.query(User).filter(User.email == email).first()
+        else:
+            user = self.db.query(User).filter(User.phone_number == phone_number).first()
+        
         if not user:
             return None
         
@@ -195,21 +235,27 @@ class AuthService:
         Raises:
             ValueError: Si las credenciales son inválidas o el código 2FA es incorrecto
         """
-        user = self.authenticate_user(login_data.email, login_data.password)
+        user = self.authenticate_user(
+            email=login_data.email,
+            phone_number=login_data.phone_number,
+            password=login_data.password
+        )
         if not user:
-            raise ValueError("Invalid email or password")
+            raise ValueError("Invalid credentials")
         
         # Check if 2FA is enabled
-        two_factor = self.db.query(TwoFactorAuth).filter(
-            TwoFactorAuth.user_id == user.user_id
-        ).first()
-        
-        if two_factor and two_factor.enabled:
-            # 2FA is enabled, verify code
+        if user.two_factor_enabled:
+            # If 2FA is enabled but no code provided, require it
             if not login_data.two_factor_code:
                 return {
-                    "two_factor_required": True,
-                    "user_id": user.user_id
+                    "access_token": "",
+                    "token_type": "bearer",
+                    "expires_in": 0,
+                    "user_id": user.user_id,
+                    "email": user.email,
+                    "user_type": user.user_type.value,
+                    "email_verified": user.email_verified,
+                    "two_factor_required": True
                 }
             
             # Verify 2FA code
@@ -232,36 +278,41 @@ class AuthService:
             "two_factor_required": False
         }
     
-    # Email Verification
+    # Email Verification (HU001)
     def verify_email(self, token: str) -> bool:
         """
         Verifica el correo electrónico del usuario con un token (HU001)
         
         Valida el token de verificación y marca el email como verificado.
-        Los tokens expiran después de 7 días.
+        El token debe ser válido y no expirado (10 minutos).
         
         Args:
             token: Token de verificación recibido por email
         
         Returns:
-            True si la verificación fue exitosa, False si el token es inválido o expiró
+            True si la verificación fue exitosa
+        
+        Raises:
+            ValueError: Si el token es inválido, expirado o ya fue usado
         """
         verification = self.db.query(EmailVerification).filter(
-            and_(
-                EmailVerification.token == token,
-                EmailVerification.verified == False,
-                EmailVerification.expires_at > datetime.utcnow()
-            )
+            EmailVerification.token == token
         ).first()
         
         if not verification:
-            return False
+            raise ValueError("Invalid verification token")
+        
+        if verification.is_expired():
+            raise ValueError("Verification token has expired")
+        
+        if verification.verified:
+            raise ValueError("Email already verified")
         
         # Mark as verified
         verification.verified = True
         verification.verified_at = datetime.utcnow()
         
-        # Update user
+        # Update user email_verified status
         user = self.db.query(User).filter(User.user_id == verification.user_id).first()
         if user:
             user.email_verified = True
@@ -273,14 +324,14 @@ class AuthService:
         """
         Reenvía el correo de verificación (HU001)
         
-        Genera un nuevo token de verificación y envía un nuevo correo electrónico.
-        El token anterior se invalida automáticamente.
+        Genera un nuevo token de verificación y envía el email.
+        Invalida el token anterior si existe.
         
         Args:
-            email: Correo electrónico del usuario
+            email: Email del usuario
         
         Returns:
-            Nuevo token de verificación generado
+            Nuevo token de verificación
         
         Raises:
             ValueError: Si el usuario no existe o el email ya está verificado
@@ -292,21 +343,23 @@ class AuthService:
         if user.email_verified:
             raise ValueError("Email already verified")
         
-        # Delete old verification
-        old_verification = self.db.query(EmailVerification).filter(
-            EmailVerification.user_id == user.user_id
-        ).first()
-        if old_verification:
-            self.db.delete(old_verification)
+        # Invalidate old verification tokens
+        old_verifications = self.db.query(EmailVerification).filter(
+            EmailVerification.user_id == user.user_id,
+            EmailVerification.verified == False
+        ).all()
+        for old_ver in old_verifications:
+            self.db.delete(old_ver)
         
-        # Create new verification token
+        # Generate new token (valid for 10 minutes)
         verification_token = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(days=7)
+        expires_at = datetime.utcnow() + timedelta(minutes=10)
         
         email_verification = EmailVerification(
             user_id=user.user_id,
             token=verification_token,
-            expires_at=expires_at
+            expires_at=expires_at,
+            verified=False
         )
         self.db.add(email_verification)
         self.db.commit()
@@ -317,7 +370,110 @@ class AuthService:
         
         return verification_token
     
-    # Two Factor Authentication
+    # SMS Verification (HU001)
+    def send_sms_verification_code(self, user_id: int, phone_number: str) -> str:
+        """
+        Envía un código de verificación por SMS (HU001)
+        
+        Genera un código de 6 dígitos y lo envía por SMS al número proporcionado.
+        El código es válido por 10 minutos.
+        
+        Args:
+            user_id: ID del usuario
+            phone_number: Número de teléfono donde enviar el código
+        
+        Returns:
+            Código de verificación generado
+        
+        Raises:
+            ValueError: Si el usuario no existe
+        """
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise ValueError("User not found")
+        
+        # Invalidate old SMS verification codes
+        old_verifications = self.db.query(SMSVerification).filter(
+            SMSVerification.user_id == user_id,
+            SMSVerification.phone_number == phone_number,
+            SMSVerification.verified == False
+        ).all()
+        for old_ver in old_verifications:
+            self.db.delete(old_ver)
+        
+        # Generate new code (valid for 10 minutes)
+        sms_service = SMSService()
+        code = sms_service.generate_code()
+        expires_at = datetime.utcnow() + timedelta(minutes=10)
+        
+        sms_verification = SMSVerification(
+            user_id=user_id,
+            phone_number=phone_number,
+            code=code,
+            expires_at=expires_at,
+            verified=False
+        )
+        self.db.add(sms_verification)
+        self.db.commit()
+        
+        # Send SMS
+        sms_service.send_verification_code(phone_number, code)
+        
+        return code
+    
+    def verify_sms_code(self, user_id: int, phone_number: str, code: str) -> bool:
+        """
+        Verifica un código SMS (HU001)
+        
+        Valida el código de verificación SMS y marca el teléfono como verificado.
+        El código debe ser válido y no expirado (10 minutos).
+        Máximo 5 intentos de verificación.
+        
+        Args:
+            user_id: ID del usuario
+            phone_number: Número de teléfono a verificar
+            code: Código de 6 dígitos recibido por SMS
+        
+        Returns:
+            True si la verificación fue exitosa
+        
+        Raises:
+            ValueError: Si el código es inválido, expirado o se excedieron los intentos
+        """
+        verification = self.db.query(SMSVerification).filter(
+            SMSVerification.user_id == user_id,
+            SMSVerification.phone_number == phone_number,
+            SMSVerification.verified == False
+        ).order_by(SMSVerification.created_at.desc()).first()
+        
+        if not verification:
+            raise ValueError("No verification code found for this phone number")
+        
+        if verification.is_expired():
+            raise ValueError("Verification code has expired")
+        
+        if verification.attempts >= 5:
+            raise ValueError("Maximum verification attempts exceeded")
+        
+        # Increment attempts
+        verification.attempts += 1
+        
+        # Verify code
+        if verification.code != code:
+            self.db.commit()
+            raise ValueError("Invalid verification code")
+        
+        # Mark as verified
+        verification.verified = True
+        verification.verified_at = datetime.utcnow()
+        
+        # Update user phone verification status (if we add this field)
+        # For now, we just mark the SMS as verified
+        
+        self.db.commit()
+        return True
+    
+    # Two Factor Authentication (HU002)
     def setup_2fa(self, user_id: int, password: str) -> dict:
         """
         Configura la autenticación de dos factores (2FA) para un usuario (HU002)
@@ -350,130 +506,151 @@ class AuthService:
         if not user:
             raise ValueError("User not found")
         
+        # Verify password
         if not verify_password(password, user.password):
             raise ValueError("Invalid password")
         
-        # Check if already setup
-        existing = self.db.query(TwoFactorAuth).filter(
+        # Check if 2FA is already enabled
+        existing_2fa = self.db.query(TwoFactorAuth).filter(
             TwoFactorAuth.user_id == user_id
         ).first()
         
-        if existing and existing.enabled:
-            raise ValueError("2FA already enabled")
+        if existing_2fa and existing_2fa.enabled:
+            raise ValueError("2FA is already enabled")
         
-        # Generate secret key
+        # Generate TOTP secret
         secret = pyotp.random_base32()
         
-        # Generate backup codes
-        backup_codes = [secrets.token_hex(4) for _ in range(10)]
+        # Generate 10 backup codes (8 digits each)
+        backup_codes = [secrets.token_hex(4).upper() for _ in range(10)]
+        backup_codes_json = json.dumps(backup_codes)
         
-        if existing:
-            existing.secret_key = secret
-            existing.backup_codes = json.dumps(backup_codes)
-            two_factor = existing
+        # Create or update 2FA record
+        if existing_2fa:
+            existing_2fa.secret_key = secret
+            existing_2fa.backup_codes = backup_codes_json
+            existing_2fa.enabled = False
+            existing_2fa.verified_at = None
+            two_factor = existing_2fa
         else:
             two_factor = TwoFactorAuth(
                 user_id=user_id,
                 secret_key=secret,
-                backup_codes=json.dumps(backup_codes),
+                backup_codes=backup_codes_json,
                 enabled=False
             )
             self.db.add(two_factor)
         
-        self.db.commit()
-        self.db.refresh(two_factor)
+        self.db.flush()
         
         # Generate QR code
         totp = pyotp.TOTP(secret)
+        issuer_name = settings.PROJECT_NAME or "DflayerApi"
         provisioning_uri = totp.provisioning_uri(
             name=user.email,
-            issuer_name=settings.PROJECT_NAME
+            issuer_name=issuer_name
         )
         
+        # Create QR code
         qr = qrcode.QRCode(version=1, box_size=10, border=5)
         qr.add_data(provisioning_uri)
         qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
         
-        # Convert to base64
+        img = qr.make_image(fill_color="black", back_color="white")
         buffer = io.BytesIO()
-        img.save(buffer, format='PNG')
-        qr_code_url = f"data:image/png;base64,{base64.b64encode(buffer.getvalue()).decode()}"
+        img.save(buffer, format="PNG")
+        buffer.seek(0)
+        
+        # Convert to base64 data URI
+        img_base64 = base64.b64encode(buffer.read()).decode()
+        qr_code_url = f"data:image/png;base64,{img_base64}"
         
         return {
             "secret_key": secret,
             "qr_code_url": qr_code_url,
-            "backup_codes": backup_codes
+            "backup_codes": backup_codes,
+            "message": "Scan the QR code with your authenticator app and verify with a code"
         }
     
     def verify_2fa_setup(self, user_id: int, code: str) -> bool:
         """
-        Verifica y habilita el 2FA usando un código de la aplicación autenticadora (HU002)
+        Verifica y habilita el 2FA usando un código de la app autenticadora (HU002)
         
-        Valida que el usuario haya configurado correctamente su app autenticadora
-        y habilita permanentemente el 2FA para la cuenta.
+        El usuario debe escanear el QR y proporcionar un código de 6 dígitos
+        para confirmar que configuró correctamente su app autenticadora.
         
         Args:
             user_id: ID del usuario
-            code: Código de 6 dígitos generado por la aplicación autenticadora
+            code: Código de 6 dígitos de la app autenticadora
         
         Returns:
-            True si el código es válido y el 2FA fue habilitado, False en caso contrario
+            True si la verificación fue exitosa
+        
+        Raises:
+            ValueError: Si el usuario no tiene 2FA configurado, el código es inválido,
+                       o el 2FA ya está habilitado
         """
         two_factor = self.db.query(TwoFactorAuth).filter(
             TwoFactorAuth.user_id == user_id
         ).first()
         
-        if not two_factor or not two_factor.secret_key:
-            return False
+        if not two_factor:
+            raise ValueError("2FA not configured. Please set it up first.")
         
+        if two_factor.enabled:
+            raise ValueError("2FA is already enabled")
+        
+        # Verify code
         totp = pyotp.TOTP(two_factor.secret_key)
-        if totp.verify(code, valid_window=1):
-            two_factor.enabled = True
-            self.db.commit()
-            return True
+        if not totp.verify(code, valid_window=1):
+            raise ValueError("Invalid 2FA code")
         
-        return False
+        # Enable 2FA
+        two_factor.enabled = True
+        two_factor.verified_at = datetime.utcnow()
+        
+        # Update user's two_factor_enabled field
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if user:
+            user.two_factor_enabled = True
+            user.two_factor_secret = two_factor.secret_key
+        
+        self.db.commit()
+        return True
     
     def verify_2fa_code(self, user_id: int, code: str) -> bool:
         """
         Verifica un código 2FA durante el login (HU002)
         
-        Acepta tanto códigos TOTP de la aplicación autenticadora como códigos de respaldo.
-        Los códigos de respaldo se consumen al usarse (no se pueden reutilizar).
+        Puede verificar tanto códigos TOTP de la app como códigos de respaldo.
         
         Args:
             user_id: ID del usuario
-            code: Código 2FA (TOTP de 6 dígitos o código de respaldo)
+            code: Código de 6 dígitos (TOTP) o código de respaldo
         
         Returns:
             True si el código es válido, False en caso contrario
         """
         two_factor = self.db.query(TwoFactorAuth).filter(
-            and_(
-                TwoFactorAuth.user_id == user_id,
-                TwoFactorAuth.enabled == True
-            )
+            TwoFactorAuth.user_id == user_id,
+            TwoFactorAuth.enabled == True
         ).first()
         
         if not two_factor:
             return False
         
+        # Try TOTP code first
         totp = pyotp.TOTP(two_factor.secret_key)
-        
-        # Check TOTP code
         if totp.verify(code, valid_window=1):
-            two_factor.last_used_at = datetime.utcnow()
-            self.db.commit()
             return True
         
-        # Check backup codes
+        # Try backup codes
         if two_factor.backup_codes:
             backup_codes = json.loads(two_factor.backup_codes)
-            if code in backup_codes:
-                backup_codes.remove(code)
-                two_factor.backup_codes = json.dumps(backup_codes)
-                two_factor.last_used_at = datetime.utcnow()
+            if code.upper() in backup_codes:
+                # Remove used backup code
+                backup_codes.remove(code.upper())
+                two_factor.backup_codes = json.dumps(backup_codes) if backup_codes else None
                 self.db.commit()
                 return True
         
@@ -481,10 +658,9 @@ class AuthService:
     
     def disable_2fa(self, user_id: int, password: str, code: str) -> bool:
         """
-        Deshabilita la autenticación de dos factores (HU002)
+        Deshabilita el 2FA para un usuario (HU002)
         
-        Requiere tanto la contraseña como un código 2FA válido para prevenir
-        deshabilitación no autorizada.
+        Requiere contraseña y código 2FA para confirmar la identidad.
         
         Args:
             user_id: ID del usuario
@@ -495,61 +671,75 @@ class AuthService:
             True si el 2FA fue deshabilitado exitosamente
         
         Raises:
-            ValueError: Si el usuario no existe, la contraseña es incorrecta,
-                       o el código 2FA es inválido
+            ValueError: Si las credenciales son inválidas o el 2FA no está habilitado
         """
         user = self.db.query(User).filter(User.user_id == user_id).first()
         if not user:
             raise ValueError("User not found")
         
+        # Verify password
         if not verify_password(password, user.password):
             raise ValueError("Invalid password")
         
+        two_factor = self.db.query(TwoFactorAuth).filter(
+            TwoFactorAuth.user_id == user_id,
+            TwoFactorAuth.enabled == True
+        ).first()
+        
+        if not two_factor:
+            raise ValueError("2FA is not enabled")
+        
+        # Verify 2FA code
         if not self.verify_2fa_code(user_id, code):
             raise ValueError("Invalid 2FA code")
         
-        two_factor = self.db.query(TwoFactorAuth).filter(
-            TwoFactorAuth.user_id == user_id
-        ).first()
+        # Disable 2FA
+        two_factor.enabled = False
+        user.two_factor_enabled = False
+        user.two_factor_secret = None
         
-        if two_factor:
-            two_factor.enabled = False
-            self.db.commit()
-            return True
-        
-        return False
+        self.db.commit()
+        return True
     
-    # Password Reset
+    # Password Reset (HU002)
     def request_password_reset(self, email: str) -> str:
         """
-        Solicita el restablecimiento de contraseña (HU002)
+        Solicita un restablecimiento de contraseña (HU002)
         
-        Genera un token de restablecimiento válido por 24 horas y envía un correo
-        electrónico con el enlace para restablecer la contraseña.
-        
-        Por seguridad, este método siempre retorna un valor (incluso si el email
-        no existe) para prevenir enumeración de emails.
+        Genera un token de recuperación y envía un email al usuario
+        con instrucciones para restablecer su contraseña.
         
         Args:
-            email: Correo electrónico de la cuenta
+            email: Email del usuario que solicita el restablecimiento
         
         Returns:
-            Token de restablecimiento si el email existe, None en caso contrario
-            (pero siempre se envía el correo si el usuario existe)
+            Token de recuperación generado
+        
+        Raises:
+            ValueError: Si el usuario no existe
         """
         user = self.db.query(User).filter(User.email == email).first()
         if not user:
-            # Don't reveal if user exists
-            return None
+            # Por seguridad, no revelamos si el email existe o no
+            return secrets.token_urlsafe(32)  # Return dummy token
         
-        # Generate reset token
+        # Invalidate old reset tokens
+        old_resets = self.db.query(PasswordReset).filter(
+            PasswordReset.user_id == user.user_id,
+            PasswordReset.used == False
+        ).all()
+        for old_reset in old_resets:
+            self.db.delete(old_reset)
+        
+        # Generate new reset token (valid for 1 hour)
         reset_token = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(hours=24)
+        expires_at = datetime.utcnow() + timedelta(hours=1)
         
         password_reset = PasswordReset(
             user_id=user.user_id,
             token=reset_token,
-            expires_at=expires_at
+            expires_at=expires_at,
+            used=False
         )
         self.db.add(password_reset)
         self.db.commit()
@@ -562,34 +752,39 @@ class AuthService:
     
     def reset_password(self, token: str, new_password: str) -> bool:
         """
-        Restablece la contraseña usando un token válido (HU002)
+        Restablece la contraseña del usuario con un token (HU002)
         
-        Valida el token de restablecimiento y actualiza la contraseña del usuario.
-        El token solo puede usarse una vez y expira después de 24 horas.
+        Valida el token de recuperación y actualiza la contraseña del usuario.
         
         Args:
-            token: Token de restablecimiento recibido por email
-            new_password: Nueva contraseña (se hashea automáticamente)
+            token: Token de recuperación recibido por email
+            new_password: Nueva contraseña del usuario
         
         Returns:
-            True si la contraseña fue restablecida exitosamente, False si el token
-            es inválido, expiró o ya fue usado
+            True si el restablecimiento fue exitoso
+        
+        Raises:
+            ValueError: Si el token es inválido, expirado o ya fue usado
         """
         reset = self.db.query(PasswordReset).filter(
-            and_(
-                PasswordReset.token == token,
-                PasswordReset.used == False,
-                PasswordReset.expires_at > datetime.utcnow()
-            )
+            PasswordReset.token == token
         ).first()
         
         if not reset:
-            return False
+            raise ValueError("Invalid reset token")
         
-        # Update password
+        if reset.is_expired():
+            raise ValueError("Reset token has expired")
+        
+        if reset.used:
+            raise ValueError("Reset token has already been used")
+        
+        # Update user password
         user = self.db.query(User).filter(User.user_id == reset.user_id).first()
-        if user:
-            user.password = get_password_hash(new_password)
+        if not user:
+            raise ValueError("User not found")
+        
+        user.password = get_password_hash(new_password)
         
         # Mark token as used
         reset.used = True

@@ -14,6 +14,8 @@ from app.schemas.auth import (
     UserLoginRequest, TokenResponse,
     EmailVerificationRequest, EmailVerificationResponse,
     ResendVerificationRequest,
+    SMSVerificationRequest, SMSVerificationResponse,
+    SendSMSVerificationRequest,
     TwoFactorSetupRequest, TwoFactorSetupResponse,
     TwoFactorVerifyRequest,
     TwoFactorDisableRequest,
@@ -23,7 +25,7 @@ from app.schemas.auth import (
 from app.core.security import decode_access_token
 from app.core.config import settings
 from app.models.user import User
-from app.models.two_factor_auth import TwoFactorAuth
+# TwoFactorAuth removed - not in spec
 
 router = APIRouter()
 security = HTTPBearer()
@@ -109,9 +111,15 @@ async def get_current_user(
     - **username**: Nombre de usuario (mínimo 3 caracteres, solo alfanuméricos y guión bajo)
     
     **Nota importante:**
-    - Todos los usuarios se registran como tipo `client` por defecto
+    - Todos los usuarios se registran como tipo `usuario` por defecto
     - El tipo de usuario (`user_type`) es interno y solo puede ser modificado por administradores
-    - Para cambiar a `merchant` o `affiliate`, contacte con un administrador
+    - TODOS los usuarios (admin y usuario) tienen EXACTAMENTE las mismas funcionalidades:
+      * Crear contenido
+      * Crear campañas publicitarias
+      * Vender bonos
+      * Ganar por interacciones
+      * Invitar referidos
+    - `is_business_account` es solo visual, no otorga permisos adicionales
     
     **Respuesta:**
     - Retorna un token de acceso JWT que permite autenticarse inmediatamente
@@ -201,29 +209,24 @@ async def login_user(
         )
 
 
-# Email Verification Endpoints
+# Email Verification Endpoints (HU001)
 @router.post(
     "/verify-email",
     response_model=EmailVerificationResponse,
     summary="Verificar correo electrónico",
     description="""
-    **Verificación de Correo Electrónico (HU001)**
+    **Verificación de Email (HU001)**
     
-    Permite verificar el correo electrónico de un usuario usando el token de verificación enviado por email.
+    Verifica el correo electrónico del usuario usando el token recibido por email.
+    El token es válido por 10 minutos después de ser enviado.
     
     **Parámetros requeridos:**
-    - **token**: Token de verificación recibido en el correo electrónico de registro
+    - **token**: Token de verificación recibido por email
     
-    **Comportamiento:**
-    - Valida el token de verificación
-    - Si el token es válido y no ha expirado, marca el correo como verificado
-    - Los tokens de verificación expiran después de 7 días
-    
-    **Respuesta:**
-    - Confirma si la verificación fue exitosa
-    - Proporciona un mensaje de confirmación
+    **Errores:**
+    - 400: Si el token es inválido, expirado o ya fue usado
     """,
-    response_description="Resultado de la verificación del correo electrónico"
+    response_description="Resultado de la verificación de email"
 )
 async def verify_email(
     verification_data: EmailVerificationRequest,
@@ -231,39 +234,35 @@ async def verify_email(
 ):
     auth_service = AuthService(db)
     
-    verified = auth_service.verify_email(verification_data.token)
-    
-    if not verified:
+    try:
+        auth_service.verify_email(verification_data.token)
+        return EmailVerificationResponse(
+            verified=True,
+            message="Email verified successfully"
+        )
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification token"
+            detail=str(e)
         )
-    
-    return EmailVerificationResponse(
-        verified=True,
-        message="Email verified successfully"
-    )
 
 
 @router.post(
     "/resend-verification",
     summary="Reenviar correo de verificación",
     description="""
-    **Reenvío de Correo de Verificación (HU001)**
+    **Reenvío de Verificación de Email (HU001)**
     
-    Permite reenviar el correo electrónico de verificación a un usuario que no lo recibió o cuyo token expiró.
+    Reenvía un nuevo correo de verificación al usuario.
+    Invalida cualquier token de verificación anterior.
     
     **Parámetros requeridos:**
-    - **email**: Correo electrónico del usuario que solicita el reenvío
+    - **email**: Email del usuario
     
-    **Comportamiento:**
-    - Genera un nuevo token de verificación
-    - Envía un nuevo correo electrónico con el token
-    - El nuevo token tiene validez de 7 días
-    
-    **Nota:** Este endpoint siempre retorna éxito para prevenir la enumeración de emails.
+    **Errores:**
+    - 400: Si el usuario no existe o el email ya está verificado
     """,
-    response_description="Confirmación de que el correo de verificación fue enviado"
+    response_description="Mensaje de confirmación"
 )
 async def resend_verification_email(
     request: ResendVerificationRequest,
@@ -273,12 +272,7 @@ async def resend_verification_email(
     
     try:
         token = auth_service.resend_verification_email(request.email)
-        
-        # Email sent automatically via AuthService
-        
-        return {
-            "message": "Verification email sent"
-        }
+        return {"message": "Verification email sent successfully"}
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -286,35 +280,117 @@ async def resend_verification_email(
         )
 
 
-# Two Factor Authentication Endpoints
+# SMS Verification Endpoints (HU001)
 @router.post(
-    "/2fa/setup",
+    "/send-sms-verification",
+    summary="Enviar código de verificación por SMS",
+    description="""
+    **Envío de Código de Verificación SMS (HU001)**
+    
+    Envía un código de verificación de 6 dígitos por SMS al número de teléfono
+    del usuario autenticado. El código es válido por 10 minutos.
+    
+    **Autenticación requerida:**
+    - Requiere un token JWT válido
+    
+    **Parámetros requeridos:**
+    - **phone_number**: Número de teléfono donde enviar el código
+    
+    **Nota:** Si ya existe un código pendiente, se invalida y se genera uno nuevo.
+    """,
+    response_description="Confirmación de envío de código SMS"
+)
+async def send_sms_verification(
+    request: SendSMSVerificationRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    auth_service = AuthService(db)
+    
+    try:
+        code = auth_service.send_sms_verification_code(current_user.user_id, request.phone_number)
+        return {"message": "SMS verification code sent successfully"}
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+@router.post(
+    "/verify-sms",
+    response_model=SMSVerificationResponse,
+    summary="Verificar código SMS",
+    description="""
+    **Verificación de Código SMS (HU001)**
+    
+    Verifica el código de 6 dígitos recibido por SMS.
+    El código debe ser válido y no expirado (10 minutos).
+    Máximo 5 intentos de verificación.
+    
+    **Autenticación requerida:**
+    - Requiere un token JWT válido
+    
+    **Parámetros requeridos:**
+    - **phone_number**: Número de teléfono a verificar
+    - **code**: Código de 6 dígitos recibido por SMS
+    
+    **Errores:**
+    - 400: Si el código es inválido, expirado o se excedieron los intentos
+    """,
+    response_description="Resultado de la verificación SMS"
+)
+async def verify_sms(
+    verification_data: SMSVerificationRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    auth_service = AuthService(db)
+    
+    try:
+        auth_service.verify_sms_code(
+            current_user.user_id,
+            verification_data.phone_number,
+            verification_data.code
+        )
+        return SMSVerificationResponse(
+            verified=True,
+            message="Phone number verified successfully"
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+# Two Factor Authentication Endpoints (HU002)
+@router.post(
+    "/setup-2fa",
     response_model=TwoFactorSetupResponse,
     summary="Configurar autenticación de dos factores",
     description="""
-    **Configuración de Autenticación de Dos Factores (HU002)**
+    **Configuración de 2FA (HU002)**
     
-    Permite configurar la autenticación de dos factores (2FA) para la cuenta del usuario autenticado.
+    Configura la autenticación de dos factores para el usuario autenticado.
+    Genera un código QR que debe ser escaneado con una app autenticadora
+    (Google Authenticator, Authy, etc.) y 10 códigos de respaldo.
+    
+    **Autenticación requerida:**
+    - Requiere un token JWT válido
     
     **Parámetros requeridos:**
-    - **password**: Contraseña del usuario para confirmar la identidad
-    
-    **Comportamiento:**
-    - Genera una clave secreta única para el usuario
-    - Crea un código QR que debe ser escaneado con una aplicación autenticadora (Google Authenticator, Authy, etc.)
-    - Genera códigos de respaldo que deben guardarse de forma segura
-    - El 2FA NO se habilita automáticamente; el usuario debe verificar con un código primero
-    
-    **Pasos siguientes:**
-    1. Escanear el código QR con una aplicación autenticadora
-    2. Usar el endpoint `/2fa/verify` con un código generado por la app para habilitar el 2FA
+    - **password**: Contraseña del usuario para confirmar identidad
     
     **Respuesta:**
-    - URL del código QR para escanear
-    - Clave secreta (para configuración manual si es necesario)
-    - Lista de códigos de respaldo (guardar de forma segura)
+    - **secret_key**: Clave secreta para configuración manual
+    - **qr_code_url**: URL del código QR en formato data URI (base64)
+    - **backup_codes**: Lista de 10 códigos de respaldo (guardar de forma segura)
+    
+    **Nota:** El 2FA NO se habilita automáticamente. Debe usar `/verify-2fa-setup`
+    con un código de la app para habilitarlo.
     """,
-    response_description="Información de configuración de 2FA incluyendo QR code y códigos de respaldo"
+    response_description="Información de configuración de 2FA"
 )
 async def setup_2fa(
     request: TwoFactorSetupRequest,
@@ -325,13 +401,7 @@ async def setup_2fa(
     
     try:
         result = auth_service.setup_2fa(current_user.user_id, request.password)
-        
-        return TwoFactorSetupResponse(
-            secret_key=result["secret_key"],
-            qr_code_url=result["qr_code_url"],
-            backup_codes=result["backup_codes"],
-            message="Scan QR code with authenticator app and verify with code"
-        )
+        return TwoFactorSetupResponse(**result)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -340,24 +410,24 @@ async def setup_2fa(
 
 
 @router.post(
-    "/2fa/verify",
+    "/verify-2fa-setup",
     summary="Verificar y habilitar 2FA",
     description="""
-    **Verificación y Habilitación de 2FA (HU002)**
+    **Verificación de Configuración de 2FA (HU002)**
     
-    Verifica que el usuario haya configurado correctamente su aplicación autenticadora y habilita el 2FA.
+    Verifica que el usuario configuró correctamente su app autenticadora
+    y habilita el 2FA para su cuenta.
+    
+    **Autenticación requerida:**
+    - Requiere un token JWT válido
     
     **Parámetros requeridos:**
-    - **code**: Código de 6 dígitos generado por la aplicación autenticadora después de escanear el QR
+    - **code**: Código de 6 dígitos de la app autenticadora
     
-    **Comportamiento:**
-    - Valida el código proporcionado contra la clave secreta generada
-    - Si el código es válido, habilita permanentemente el 2FA para la cuenta
-    - A partir de este momento, el usuario necesitará proporcionar un código 2FA al iniciar sesión
-    
-    **Nota:** Una vez habilitado, el 2FA solo puede deshabilitarse usando el endpoint `/2fa/disable` con la contraseña y un código válido.
+    **Errores:**
+    - 400: Si el código es inválido o el 2FA ya está habilitado
     """,
-    response_description="Confirmación de que el 2FA fue habilitado exitosamente"
+    response_description="Confirmación de habilitación de 2FA"
 )
 async def verify_2fa_setup(
     request: TwoFactorVerifyRequest,
@@ -366,42 +436,36 @@ async def verify_2fa_setup(
 ):
     auth_service = AuthService(db)
     
-    verified = auth_service.verify_2fa_setup(current_user.user_id, request.code)
-    
-    if not verified:
+    try:
+        auth_service.verify_2fa_setup(current_user.user_id, request.code)
+        return {"message": "2FA enabled successfully"}
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid 2FA code"
+            detail=str(e)
         )
-    
-    return {
-        "message": "2FA enabled successfully",
-        "enabled": True
-    }
 
 
 @router.post(
-    "/2fa/disable",
+    "/disable-2fa",
     summary="Deshabilitar autenticación de dos factores",
     description="""
     **Deshabilitación de 2FA (HU002)**
     
-    Permite deshabilitar la autenticación de dos factores para la cuenta del usuario.
+    Deshabilita la autenticación de dos factores para el usuario autenticado.
+    Requiere contraseña y código 2FA para confirmar la identidad.
+    
+    **Autenticación requerida:**
+    - Requiere un token JWT válido
     
     **Parámetros requeridos:**
-    - **password**: Contraseña del usuario para confirmar la identidad
-    - **code**: Código 2FA de 6 dígitos de la aplicación autenticadora O uno de los códigos de respaldo
+    - **password**: Contraseña del usuario
+    - **code**: Código 2FA o código de respaldo
     
-    **Comportamiento:**
-    - Valida tanto la contraseña como el código 2FA
-    - Si ambos son correctos, deshabilita el 2FA permanentemente
-    - El usuario podrá iniciar sesión solo con email y contraseña después de esto
-    
-    **Seguridad:**
-    - Requiere ambos factores (contraseña + código) para prevenir deshabilitación no autorizada
-    - Acepta códigos de respaldo en caso de pérdida del dispositivo autenticador
+    **Errores:**
+    - 400: Si las credenciales son inválidas o el 2FA no está habilitado
     """,
-    response_description="Confirmación de que el 2FA fue deshabilitado exitosamente"
+    response_description="Confirmación de deshabilitación de 2FA"
 )
 async def disable_2fa(
     request: TwoFactorDisableRequest,
@@ -411,22 +475,8 @@ async def disable_2fa(
     auth_service = AuthService(db)
     
     try:
-        disabled = auth_service.disable_2fa(
-            current_user.user_id,
-            request.password,
-            request.code
-        )
-        
-        if not disabled:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to disable 2FA"
-            )
-        
-        return {
-            "message": "2FA disabled successfully",
-            "enabled": False
-        }
+        auth_service.disable_2fa(current_user.user_id, request.password, request.code)
+        return {"message": "2FA disabled successfully"}
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -434,64 +484,25 @@ async def disable_2fa(
         )
 
 
-@router.get(
-    "/2fa/status",
-    summary="Obtener estado de 2FA",
-    description="""
-    **Estado de Autenticación de Dos Factores**
-    
-    Obtiene el estado actual de la configuración de 2FA para el usuario autenticado.
-    
-    **Respuesta:**
-    - **enabled**: Indica si el 2FA está actualmente habilitado y activo
-    - **setup**: Indica si el usuario ha iniciado el proceso de configuración de 2FA (aunque no esté habilitado)
-    
-    **Casos de uso:**
-    - Verificar si el usuario necesita configurar 2FA
-    - Verificar si el 2FA está activo antes de requerir código en el login
-    """,
-    response_description="Estado actual de la configuración de 2FA del usuario"
-)
-async def get_2fa_status(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    two_factor = db.query(TwoFactorAuth).filter(
-        TwoFactorAuth.user_id == current_user.user_id
-    ).first()
-    
-    return {
-        "enabled": two_factor.enabled if two_factor else False,
-        "setup": two_factor is not None
-    }
-
-
-# Password Reset Endpoints
+# Password Reset Endpoints (HU002)
 @router.post(
-    "/password-reset/request",
+    "/request-password-reset",
     response_model=PasswordResetResponse,
     summary="Solicitar restablecimiento de contraseña",
     description="""
     **Solicitud de Restablecimiento de Contraseña (HU002)**
     
-    Permite solicitar el restablecimiento de contraseña cuando el usuario la ha olvidado.
+    Envía un email al usuario con un token para restablecer su contraseña.
+    El token es válido por 1 hora.
     
     **Parámetros requeridos:**
-    - **email**: Correo electrónico de la cuenta para la cual se solicita el restablecimiento
+    - **email**: Email del usuario
     
-    **Comportamiento:**
-    - Si el email existe en el sistema, genera un token de restablecimiento
-    - Envía un correo electrónico con un enlace para restablecer la contraseña
-    - El token tiene validez de 24 horas
-    
-    **Seguridad:**
-    - Este endpoint siempre retorna éxito para prevenir la enumeración de emails
-    - El mensaje de respuesta es genérico independientemente de si el email existe o no
-    
-    **Pasos siguientes:**
-    - El usuario debe hacer clic en el enlace del correo o usar el endpoint `/password-reset/confirm` con el token
+    **Nota de seguridad:**
+    - Por seguridad, siempre retorna éxito incluso si el email no existe
+    - Esto previene enumeración de usuarios
     """,
-    response_description="Confirmación de que la solicitud fue procesada (siempre retorna éxito por seguridad)"
+    response_description="Confirmación de solicitud de restablecimiento"
 )
 async def request_password_reset(
     request: PasswordResetRequest,
@@ -499,11 +510,8 @@ async def request_password_reset(
 ):
     auth_service = AuthService(db)
     
-    token = auth_service.request_password_reset(request.email)
-    
-    # Email sent automatically via AuthService
-    # Always return success to prevent email enumeration
-    
+    # Always return success for security (prevent user enumeration)
+    auth_service.request_password_reset(request.email)
     return PasswordResetResponse(
         message="If the email exists, a password reset link has been sent",
         success=True
@@ -511,48 +519,42 @@ async def request_password_reset(
 
 
 @router.post(
-    "/password-reset/confirm",
+    "/reset-password",
     response_model=PasswordResetResponse,
-    summary="Confirmar restablecimiento de contraseña",
+    summary="Restablecer contraseña",
     description="""
-    **Confirmación de Restablecimiento de Contraseña (HU002)**
+    **Restablecimiento de Contraseña (HU002)**
     
-    Permite establecer una nueva contraseña usando el token recibido por correo electrónico.
+    Restablece la contraseña del usuario usando el token recibido por email.
+    El token debe ser válido y no expirado (1 hora).
     
     **Parámetros requeridos:**
-    - **token**: Token de restablecimiento recibido en el correo electrónico
-    - **new_password**: Nueva contraseña (mínimo 8 caracteres, debe contener mayúsculas, minúsculas y un dígito)
+    - **token**: Token de recuperación recibido por email
+    - **new_password**: Nueva contraseña (mínimo 8 caracteres, mayúsculas, minúsculas, números)
     
-    **Comportamiento:**
-    - Valida el token de restablecimiento
-    - Si el token es válido y no ha expirado, actualiza la contraseña del usuario
-    - Los tokens expiran después de 24 horas
-    - Después de restablecer la contraseña, el usuario debe iniciar sesión con la nueva contraseña
-    
-    **Seguridad:**
-    - El token solo puede usarse una vez
-    - Después de restablecer, todos los tokens de sesión anteriores se invalidan
+    **Errores:**
+    - 400: Si el token es inválido, expirado o ya fue usado
+    - 400: Si la nueva contraseña no cumple los requisitos
     """,
-    response_description="Confirmación de que la contraseña fue restablecida exitosamente"
+    response_description="Resultado del restablecimiento de contraseña"
 )
-async def confirm_password_reset(
+async def reset_password(
     request: PasswordResetConfirmRequest,
     db: Session = Depends(get_db)
 ):
     auth_service = AuthService(db)
     
-    success = auth_service.reset_password(request.token, request.new_password)
-    
-    if not success:
+    try:
+        auth_service.reset_password(request.token, request.new_password)
+        return PasswordResetResponse(
+            message="Password reset successfully",
+            success=True
+        )
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token"
+            detail=str(e)
         )
-    
-    return PasswordResetResponse(
-        message="Password reset successfully",
-        success=True
-    )
 
 
 # User Info Endpoint
@@ -572,7 +574,7 @@ async def confirm_password_reset(
     - ID del usuario
     - Email y nombre de usuario
     - Nombre completo
-    - Tipo de usuario (client, merchant, affiliate)
+    - Tipo de usuario (usuario, admin)
     - Nivel del usuario en el sistema
     - Estado de verificación de email
     - Estado de habilitación de 2FA
@@ -590,10 +592,7 @@ async def get_current_user_info(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    two_factor = db.query(TwoFactorAuth).filter(
-        TwoFactorAuth.user_id == current_user.user_id
-    ).first()
-    
+    # TwoFactorAuth model removed - use user.two_factor_enabled field directly
     return UserInfo(
         user_id=current_user.user_id,
         email=current_user.email,
@@ -602,7 +601,7 @@ async def get_current_user_info(
         user_type=current_user.user_type.value,
         level=current_user.level,
         email_verified=current_user.email_verified,
-        two_factor_enabled=two_factor.enabled if two_factor else False,
+        two_factor_enabled=current_user.two_factor_enabled,  # Use field directly, model removed
         is_active=current_user.is_active,
         registration_date=current_user.registration_date
     )

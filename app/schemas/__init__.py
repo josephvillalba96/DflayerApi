@@ -13,22 +13,20 @@ from app.schemas.auth import (
     UserInfo
 )
 from app.schemas.feed import FeedRequest, FeedResponse, FeedItemResponse
-from app.schemas.category import (
-    CategoryCreateRequest,
-    CategoryUpdateRequest,
-    CategoryResponse,
-    CategoryListResponse
-)
-from app.schemas.user_upgrade import (
-    UserUpgradeRequest,
-    UserUpgradeResponse,
-    UserUpgradeStatusResponse
-)
+# Category schemas removed - Category model not in spec
 from app.schemas.admin_user import (
     ChangeUserTypeRequest,
     ChangeUserTypeResponse,
-    UserUpgradeListResponse,
-    RejectUpgradeRequest
+    PromoteRequest
+)
+from app.schemas.user import (
+    ProfileUpdateRequest,
+    ProfilePictureUpdateRequest,
+    CoverPictureUpdateRequest,
+    UserProfileResponse,
+    InterestCategoryRequest,
+    InterestCategoryResponse,
+    InterestCategoriesListResponse
 )
 
 __all__ = [
@@ -53,15 +51,14 @@ __all__ = [
     "FeedRequest",
     "FeedResponse",
     "FeedItemResponse",
-    "CategoryCreateRequest",
-    "CategoryUpdateRequest",
-    "CategoryResponse",
-    "CategoryListResponse",
-    "UserUpgradeRequest",
-    "UserUpgradeResponse",
-    "UserUpgradeStatusResponse",
     "ChangeUserTypeRequest",
     "ChangeUserTypeResponse",
-    "UserUpgradeListResponse",
-    "RejectUpgradeRequest",
+    "PromoteRequest",
+    "ProfileUpdateRequest",
+    "ProfilePictureUpdateRequest",
+    "CoverPictureUpdateRequest",
+    "UserProfileResponse",
+    "InterestCategoryRequest",
+    "InterestCategoryResponse",
+    "InterestCategoriesListResponse",
 ]

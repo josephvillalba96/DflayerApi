@@ -1,6 +1,6 @@
 """
 Content Endpoints (HU006)
-Handles content creation and management for authenticated merchants/affiliates
+Handles content creation and management for all authenticated users
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
@@ -28,14 +28,17 @@ router = APIRouter()
     description="""
     **Creación de Contenido (HU006)**
     
-    Permite a comerciantes y afiliados crear publicaciones de contenido en la plataforma.
+    Permite a TODOS los usuarios (admin y usuario) crear publicaciones de contenido.
+    No hay restricciones basadas en user_type.
     
     **Autenticación requerida:**
     - Requiere un token JWT válido en el header `Authorization: Bearer <token>`
+    - El usuario debe estar autenticado
     
     **Permisos:**
-    - Todos los usuarios autenticados pueden crear contenido (client, merchant, affiliate, admin)
-    - No hay restricciones de tipo de usuario para crear contenido
+    - TODOS los usuarios pueden crear contenido (admin y usuario)
+    - TODOS los usuarios pueden monetizar su contenido sin restricciones
+    - is_business_account es solo visual, no afecta permisos
     
     **Parámetros requeridos:**
     - **content_type**: Tipo de contenido. Valores permitidos: `video`, `image`, `text`, `audio`
@@ -78,6 +81,11 @@ async def create_content(
         if content.hashtags:
             hashtags = [ch.hashtag.name for ch in content.hashtags]
         
+        # Get categories
+        categories = []
+        if content.categories:
+            categories = [cc.category.name for cc in content.categories]
+        
         return ContentResponse(
             content_id=content.content_id,
             merchant_id=content.merchant_id,
@@ -96,7 +104,7 @@ async def create_content(
             created_at=content.created_at,
             published_at=content.published_at,
             location_id=content.location_id,
-            categories=[],
+            categories=categories,
             hashtags=hashtags
         )
     except ValueError as e:
@@ -150,26 +158,30 @@ async def get_user_contents(
         if content.hashtags:
             hashtags = [ch.hashtag.name for ch in content.hashtags]
         
+        categories = []
+        if content.categories:
+            categories = [cc.category.name for cc in content.categories]
+        
         content_responses.append(ContentResponse(
-            content_id=content.content_id,
-            merchant_id=content.merchant_id,
-            merchant_name=current_user.name,
-            content_type=content.content_type.value,
-            url=content.url,
-            title=content.title,
-            description=content.description,
-            thumbnail_url=content.thumbnail_url,
-            duration=content.duration,
-            format=content.format,
-            resolution=content.resolution,
-            visibility=content.visibility.value,
-            allow_comments=content.allow_comments,
-            active=content.active,
-            created_at=content.created_at,
-            published_at=content.published_at,
-            location_id=content.location_id,
-            categories=[],
-            hashtags=hashtags
+                content_id=content.content_id,
+                merchant_id=content.merchant_id,
+                merchant_name=current_user.name,
+                content_type=content.content_type.value,
+                url=content.url,
+                title=content.title,
+                description=content.description,
+                thumbnail_url=content.thumbnail_url,
+                duration=content.duration,
+                format=content.format,
+                resolution=content.resolution,
+                visibility=content.visibility.value,
+                allow_comments=content.allow_comments,
+                active=content.active,
+                created_at=content.created_at,
+                published_at=content.published_at,
+                location_id=content.location_id,
+                categories=categories,
+                hashtags=hashtags
         ))
     
     return ContentListResponse(
@@ -228,7 +240,8 @@ async def get_content(
             detail="You don't have permission to view this content"
         )
     
-    hashtags = [ch.hashtag.name for ch in content.hashtags] if hasattr(content, 'hashtags') else []
+    hashtags = [ch.hashtag.name for ch in content.hashtags] if hasattr(content, 'hashtags') and content.hashtags else []
+    categories = [cc.category.name for cc in content.categories] if hasattr(content, 'categories') and content.categories else []
     
     return ContentResponse(
         content_id=content.content_id,
@@ -248,7 +261,7 @@ async def get_content(
         created_at=content.created_at,
         published_at=content.published_at,
         location_id=content.location_id,
-        categories=[],
+        categories=categories,
         hashtags=hashtags
     )
 
@@ -310,6 +323,10 @@ async def update_content(
         if content.hashtags:
             hashtags = [ch.hashtag.name for ch in content.hashtags]
         
+        categories = []
+        if content.categories:
+            categories = [cc.category.name for cc in content.categories]
+        
         return ContentResponse(
             content_id=content.content_id,
             merchant_id=content.merchant_id,
@@ -328,7 +345,7 @@ async def update_content(
             created_at=content.created_at,
             published_at=content.published_at,
             location_id=content.location_id,
-            categories=[],
+            categories=categories,
             hashtags=hashtags
         )
     except ValueError as e:

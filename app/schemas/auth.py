@@ -1,7 +1,7 @@
 """
 Authentication Schemas
 """
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, validator, root_validator
 from typing import Optional
 from datetime import datetime
 from app.schemas.base import BaseSchema
@@ -10,17 +10,31 @@ from app.schemas.base import BaseSchema
 # Registration Schemas
 class UserRegisterRequest(BaseModel):
     """
-    Schema for user registration
+    Schema for user registration (HU001)
     
-    Nota: El user_type es siempre 'client' por defecto y no puede ser modificado
+    Nota: El user_type es siempre 'user' por defecto y no puede ser modificado
     por el usuario durante el registro. Solo los administradores pueden cambiar
     el tipo de usuario después del registro.
+    
+    NOTA: Solo existen 2 tipos: 'admin' y 'usuario'. Todos los usuarios tienen
+    las mismas funcionalidades. is_business_account es solo visual.
     """
     email: EmailStr
+    phone_number: Optional[str] = Field(None, max_length=20, description="Phone number (optional but recommended)")
     password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
     name: str = Field(..., min_length=2, max_length=100)
     username: str = Field(..., min_length=3, max_length=50, pattern="^[a-zA-Z0-9_]+$")
-    # user_type removido - siempre será 'client' por defecto (solo administradores pueden cambiarlo)
+    # user_type removido - siempre será 'usuario' por defecto (solo admin puede cambiarlo)
+    
+    @validator('phone_number')
+    def validate_phone_number(cls, v):
+        """Validate phone number format if provided"""
+        if v is not None:
+            # Remove spaces, dashes, parentheses
+            cleaned = ''.join(filter(str.isdigit, v))
+            if len(cleaned) < 10 or len(cleaned) > 15:
+                raise ValueError('Phone number must be between 10 and 15 digits')
+        return v
     
     @validator('password')
     def validate_password(cls, v):
@@ -50,10 +64,24 @@ class UserRegisterResponse(BaseSchema):
 
 # Login Schemas
 class UserLoginRequest(BaseModel):
-    """Schema for user login"""
-    email: EmailStr
+    """
+    Schema for user login (HU002)
+    
+    Permite login con email o teléfono
+    """
+    email: Optional[EmailStr] = Field(None, description="Email address (required if phone_number not provided)")
+    phone_number: Optional[str] = Field(None, max_length=20, description="Phone number (required if email not provided)")
     password: str
     two_factor_code: Optional[str] = Field(None, max_length=6, description="2FA code if enabled")
+    
+    @root_validator(skip_on_failure=True)
+    def validate_at_least_one_identifier(cls, values):
+        """Ensure at least email or phone_number is provided"""
+        email = values.get('email')
+        phone = values.get('phone_number')
+        if not email and not phone:
+            raise ValueError('Either email or phone_number must be provided')
+        return values
 
 
 class TokenResponse(BaseSchema):
@@ -83,6 +111,24 @@ class EmailVerificationResponse(BaseSchema):
 class ResendVerificationRequest(BaseModel):
     """Schema for resending verification email"""
     email: EmailStr
+
+
+# SMS Verification Schemas
+class SMSVerificationRequest(BaseModel):
+    """Schema for SMS verification"""
+    phone_number: str = Field(..., max_length=20, description="Phone number to verify")
+    code: str = Field(..., min_length=6, max_length=6, description="6-digit verification code")
+
+
+class SMSVerificationResponse(BaseSchema):
+    """Schema for SMS verification response"""
+    verified: bool
+    message: str
+
+
+class SendSMSVerificationRequest(BaseModel):
+    """Schema for sending SMS verification code"""
+    phone_number: str = Field(..., max_length=20, description="Phone number to send code to")
 
 
 # Two Factor Authentication Schemas

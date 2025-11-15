@@ -124,7 +124,7 @@ async def get_feed(
                 created_at=content.created_at,
                 published_at=content.published_at,
                 location_id=content.location_id,
-                categories=[],  # TODO: Implement content categories
+                categories=[cc.category.name for cc in content.categories] if content.categories else [],
                 hashtags=hashtags
             )
             

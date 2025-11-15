@@ -4,20 +4,24 @@ Database models (SQLAlchemy)
 from app.models.base import Base
 
 # Base models
-from app.models.location import Location
-from app.models.tax_data import TaxData
-from app.models.user import User, UserType
+from app.models.tax_data import TaxData, TaxRegime, BankAccountType
+from app.models.user import User, UserType, VerificationStatus, AccountStatus
+from app.models.user_profile import UserProfile, ProfileType
+from app.models.email_verification import EmailVerification
+from app.models.password_reset import PasswordReset
+from app.models.two_factor_auth import TwoFactorAuth
+from app.models.sms_verification import SMSVerification
+from app.models.referral_network import ReferralNetwork
+from app.models.wallet import Wallet
+from app.models.post_mention import PostMention
 
 # Content models
-from app.models.category import Category
-from app.models.content import Content, ContentType, Visibility
-from app.models.hashtag import Hashtag, ContentHashtag
-from app.models.content_metrics import ContentMetrics
-from app.models.multimedia_file import MultimediaFile, FileType, ProcessingStatus, FileVersion
-from app.models.transcoding_job import (
-    TranscodingJob, TranscodingStatus, TranscodingPriority,
-    TranscodingProfile, TranscodingQueue, TranscodingLog
-)
+from app.models.content import Content, ContentType, ContentStatus, Visibility
+from app.models.post_hashtag import PostHashtag
+from app.models.multimedia_file import MultimediaFile, FileType, ProcessingStatus, UploadStatus, MediaType
+from app.models.video_transcode import VideoTranscode
+from app.models.image_variant import ImageVariant, VariantType
+from app.models.audio_track import AudioTrack
 
 # Social models
 from app.models.follow import Follow
@@ -25,74 +29,103 @@ from app.models.like import Like
 from app.models.comment import Comment
 
 # Monetization models
-from app.models.monetizable_action import MonetizableAction, ActionType
-from app.models.interaction import Interaction
+from app.models.interaction import Interaction, ActionType, ValidationStatus
 from app.models.transaction import Transaction, TransactionType, TransactionStatus
-from app.models.payment_distribution import PaymentDistribution, DistributionLevel
+from app.models.payment_distribution import InteractionDistribution, PaymentDistribution, DistributionStatus, DistributionLevel
+from app.models.advertising_campaign import AdvertisingCampaign, SalesCommission, BudgetType, CampaignStatus, CommissionStatus
+from app.models.campaign_post import CampaignPost
+from app.models.action_reward import ActionReward
+from app.models.campaign_segmentation import CampaignSegmentation, Gender
+from app.models.survey import Survey, SurveyResponse, QuestionType
 
-# Voucher and plan models
-from app.models.voucher import Voucher, VoucherStatus
-from app.models.multiplier_plan import MultiplierPlan, UserPlan
+# Bono and plan models (only models from spec)
+from app.models.voucher import Bono  # Voucher is alias, not in spec
+from app.models.bono_image import BonoImage
+from app.models.bono_purchase import BonoPurchase, PurchaseStatus
+from app.models.bono_code import BonoCode, RedemptionStatus
+from app.models.multiplier_plan import MembershipPlan, UserMembership  # MultiplierPlan/UserPlan are aliases, not in spec
+from app.models.commission_distribution import CommissionDistribution
 
-# Additional models
+# Additional models (only from spec)
 from app.models.notification import Notification, NotificationType
-from app.models.feed_item import FeedItem
-from app.models.user_preferences import UserPreferences, UserCategory
-from app.models.user_upgrade import UserUpgradeRequest, UpgradeRequestStatus
 from app.models.event_fund import EventFund
-from app.models.advertising_campaign import AdvertisingCampaign, SalesCommission
-from app.models.email_verification import EmailVerification
-from app.models.two_factor_auth import TwoFactorAuth, TwoFactorCode
-from app.models.password_reset import PasswordReset
+from app.models.withdrawal_request import WithdrawalRequest, WithdrawalMethod, RequestStatus
+from app.models.tax_record import TaxRecord, TaxType
+from app.models.admin_log import AdminLog
 
 __all__ = [
     "Base",
-    "Location",
     "TaxData",
+    "TaxRegime",
+    "BankAccountType",
     "User",
     "UserType",
-    "Category",
+    "VerificationStatus",
+    "AccountStatus",
+    "UserProfile",
+    "ProfileType",
+    "EmailVerification",
+    "PasswordReset",
+    "TwoFactorAuth",
+    "SMSVerification",
+    "ReferralNetwork",
+    "Wallet",
+    "PostMention",
     "Content",
     "ContentType",
+    "ContentStatus",
     "Visibility",
-    "Hashtag",
-    "ContentHashtag",
-    "ContentMetrics",
+    "PostHashtag",
     "MultimediaFile",
     "FileType",
     "ProcessingStatus",
-    "FileVersion",
-    "TranscodingJob",
-    "TranscodingStatus",
-    "TranscodingPriority",
-    "TranscodingProfile",
-    "TranscodingQueue",
-    "TranscodingLog",
+    "UploadStatus",
+    "MediaType",
+    "VideoTranscode",
+    "ImageVariant",
+    "VariantType",
+    "AudioTrack",
     "Follow",
     "Like",
     "Comment",
-    "MonetizableAction",
     "ActionType",
+    "ValidationStatus",
     "Interaction",
     "Transaction",
     "TransactionType",
     "TransactionStatus",
+    "InteractionDistribution",
     "PaymentDistribution",
+    "DistributionStatus",
     "DistributionLevel",
-    "Voucher",
-    "VoucherStatus",
-    "MultiplierPlan",
-    "UserPlan",
-    "Notification",
-    "NotificationType",
-    "FeedItem",
-    "UserPreferences",
-    "UserCategory",
-    "EventFund",
+    "Bono",
+    "BonoImage",
+    "BonoPurchase",
+    "PurchaseStatus",
+    "BonoCode",
+    "RedemptionStatus",
+    "MembershipPlan",
+    "UserMembership",
     "AdvertisingCampaign",
     "SalesCommission",
-    "EmailVerification",
-    "TwoFactorAuth",
-    "TwoFactorCode",
-    "PasswordReset",
+    "BudgetType",
+    "CampaignStatus",
+    "CommissionStatus",
+    "CampaignPost",
+    "ActionReward",
+    "CampaignSegmentation",
+    "Gender",
+    "Survey",
+    "SurveyResponse",
+    "QuestionType",
+    "CommissionDistribution",
+    "WithdrawalRequest",
+    "WithdrawalMethod",
+    "RequestStatus",
+    "TaxRecord",
+    "TaxType",
+    "AdminLog",
+    "Notification",
+    "NotificationType",
+    "EventFund",
 ]
