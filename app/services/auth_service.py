@@ -147,24 +147,32 @@ class AuthService:
         email_service.send_verification_email(user.email, user.name, verification_token)
         
         # Send SMS verification code if phone_number provided (HU001)
+        # Nota: Si Twilio no está configurado, solo se guarda el código pero no se envía SMS real
+        # El registro continúa normalmente usando solo email
         sms_code = None
         if user_data.phone_number:
-            sms_service = SMSService()
-            sms_code = sms_service.generate_code()
-            expires_at_sms = datetime.utcnow() + timedelta(minutes=10)
-            
-            sms_verification = SMSVerification(
-                user_id=user.user_id,
-                phone_number=user_data.phone_number,
-                code=sms_code,
-                expires_at=expires_at_sms,
-                verified=False
-            )
-            self.db.add(sms_verification)
-            self.db.flush()
-            
-            # Send SMS
-            sms_service.send_verification_code(user_data.phone_number, sms_code)
+            try:
+                sms_service = SMSService()
+                sms_code = sms_service.generate_code()
+                expires_at_sms = datetime.utcnow() + timedelta(minutes=10)
+                
+                sms_verification = SMSVerification(
+                    user_id=user.user_id,
+                    phone_number=user_data.phone_number,
+                    code=sms_code,
+                    expires_at=expires_at_sms,
+                    verified=False
+                )
+                self.db.add(sms_verification)
+                self.db.flush()
+                
+                # Send SMS (no falla si Twilio no está configurado, solo loguea)
+                sms_service.send_verification_code(user_data.phone_number, sms_code)
+            except Exception as e:
+                # Si hay algún error con SMS, no bloquear el registro
+                # El usuario puede verificar por email mientras tanto
+                print(f"[WARNING] Error al procesar SMS durante registro (no crítico): {str(e)}")
+                print(f"[INFO] El registro se completó exitosamente. El usuario puede verificar por email.")
         
         return (user, verification_token, access_token)
     
@@ -416,8 +424,13 @@ class AuthService:
         self.db.add(sms_verification)
         self.db.commit()
         
-        # Send SMS
-        sms_service.send_verification_code(phone_number, code)
+        # Send SMS (no falla si Twilio no está configurado)
+        try:
+            sms_service.send_verification_code(phone_number, code)
+        except Exception as e:
+            # Si falla el envío, no lanzar excepción, solo loguear
+            print(f"[WARNING] Error al enviar SMS (no crítico): {str(e)}")
+            print(f"[INFO] El código se generó y guardó correctamente. Verifica los logs para ver el código.")
         
         return code
     

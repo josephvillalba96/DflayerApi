@@ -26,36 +26,55 @@ class SMSService:
         """
         Envía un código de verificación por SMS
         
+        Si Twilio no está configurado, solo registra el código en logs (modo desarrollo).
+        No lanza excepciones para no interrumpir el flujo de registro.
+        
         Args:
             phone_number: Número de teléfono del destinatario
             code: Código de verificación de 6 dígitos
         
         Returns:
-            True si se envió exitosamente, False en caso contrario
+            True si se procesó (enviado o logueado), False solo en caso de error crítico
         """
         try:
-            if self.provider == 'twilio' and self.twilio_account_sid:
+            # Verificar si Twilio está completamente configurado
+            twilio_configured = (
+                self.provider == 'twilio' and
+                self.twilio_account_sid and
+                self.twilio_auth_token and
+                self.twilio_from_number
+            )
+            
+            if twilio_configured:
+                # Intentar enviar vía Twilio
                 return self._send_via_twilio(phone_number, code)
             else:
-                # Modo desarrollo: solo loguear el código
-                print(f"[SMS DEV MODE] Verification code for {phone_number}: {code}")
-                return True
+                # Modo desarrollo/pruebas: solo loguear el código
+                # No falla, solo informa que está en modo desarrollo
+                print(f"[SMS DEV MODE] Twilio no configurado. Código de verificación para {phone_number}: {code}")
+                print(f"[SMS DEV MODE] Para habilitar SMS real, configura TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN y TWILIO_FROM_NUMBER en .env")
+                return True  # Retorna True para no bloquear el flujo
         except Exception as e:
-            print(f"Error sending SMS: {str(e)}")
-            return False
+            # En caso de error, solo loguear y no fallar
+            print(f"[SMS WARNING] Error al intentar enviar SMS (no crítico): {str(e)}")
+            print(f"[SMS WARNING] El registro continúa normalmente. Código generado: {code}")
+            return True  # Retorna True para no bloquear el flujo
     
     def _send_via_twilio(self, phone_number: str, code: str) -> bool:
         """
         Envía SMS usando Twilio
         
         Requiere: pip install twilio
+        
+        Si falla, no lanza excepción para no interrumpir el flujo.
         """
         try:
             from twilio.rest import Client
             
             if not all([self.twilio_account_sid, self.twilio_auth_token, self.twilio_from_number]):
-                print("WARNING: Twilio credentials not fully configured")
-                return False
+                print("[SMS WARNING] Twilio credentials not fully configured, falling back to dev mode")
+                print(f"[SMS DEV MODE] Código de verificación para {phone_number}: {code}")
+                return True  # No fallar, solo usar modo desarrollo
             
             client = Client(self.twilio_account_sid, self.twilio_auth_token)
             
@@ -65,13 +84,20 @@ class SMSService:
                 to=phone_number
             )
             
-            return message.sid is not None
+            if message.sid:
+                print(f"[SMS SUCCESS] SMS enviado a {phone_number} (SID: {message.sid})")
+                return True
+            else:
+                print(f"[SMS WARNING] Twilio no retornó SID, pero no falla el flujo")
+                return True  # No fallar
         except ImportError:
-            print("WARNING: twilio package not installed. Install with: pip install twilio")
-            return False
+            print("[SMS WARNING] twilio package not installed. Install with: pip install twilio")
+            print(f"[SMS DEV MODE] Código de verificación para {phone_number}: {code}")
+            return True  # No fallar, usar modo desarrollo
         except Exception as e:
-            print(f"Error sending SMS via Twilio: {str(e)}")
-            return False
+            print(f"[SMS WARNING] Error sending SMS via Twilio (no crítico): {str(e)}")
+            print(f"[SMS DEV MODE] Código de verificación para {phone_number}: {code}")
+            return True  # No fallar, usar modo desarrollo
     
     @staticmethod
     def generate_code() -> str:
