@@ -12,12 +12,15 @@ from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User, UserType
 # CategoryService removed - Category model not in spec
 from app.services.admin_user_service import AdminUserService
+from app.services.tax_data_service import TaxDataService
 # Category schemas removed - Category model not in spec
 from app.schemas.admin_user import (
     ChangeUserTypeRequest,
     ChangeUserTypeResponse,
     PromoteRequest
 )
+from app.schemas.tax_data import TaxDataResponse
+from app.models.tax_data import TaxDataVerificationStatus
 
 router = APIRouter()
 
@@ -170,6 +173,156 @@ async def create_admin(
             new_user_type=updated_user.user_type.value,
             changed_by=admin_user.user_id,
             message=f"User successfully converted to 'admin'"
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+# Tax Data Verification Endpoints (HU005)
+
+@router.post(
+    "/tax-data/{user_id}/verify",
+    response_model=TaxDataResponse,
+    summary="Validar datos fiscales (Administrador)",
+    description="""
+    **Validar Datos Fiscales (HU005 - Solo Administradores)**
+    
+    Permite a los administradores validar los datos fiscales de un usuario.
+    Una vez validados, el usuario puede recibir pagos.
+    
+    **Autenticación requerida:**
+    - Requiere un token JWT válido en el header `Authorization: Bearer <token>`
+    - El usuario debe ser de tipo `admin`
+    
+    **Parámetros de ruta:**
+    - **user_id**: ID del usuario cuyos datos fiscales se van a validar
+    
+    **Comportamiento:**
+    - Cambia el estado de validación a **VERIFIED**
+    - Registra la fecha de verificación
+    - Limpia cualquier motivo de rechazo previo
+    
+    **Errores:**
+    - Si el usuario no existe, retorna 404
+    - Si el usuario no tiene datos fiscales, retorna 400
+    """,
+    response_description="Datos fiscales validados exitosamente"
+)
+async def verify_tax_data(
+    user_id: int,
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    tax_service = TaxDataService(db)
+    
+    try:
+        tax_data = tax_service.update_verification_status(
+            user_id=user_id,
+            status=TaxDataVerificationStatus.VERIFIED
+        )
+        
+        return TaxDataResponse(
+            tax_data_id=tax_data.tax_data_id,
+            document_type=tax_data.document_type.value if tax_data.document_type else None,
+            tax_identification_number=tax_data.tax_identification_number,
+            tax_regime=tax_data.tax_regime.value if tax_data.tax_regime else None,
+            rut_document_url=tax_data.rut_document_url,
+            bank_name=tax_data.bank_name,
+            bank_account_type=tax_data.bank_account_type.value if tax_data.bank_account_type else None,
+            bank_account_number=tax_data.bank_account_number,
+            bank_account_holder=tax_data.bank_account_holder,
+            verification_status=tax_data.verification_status.value if tax_data.verification_status else "pending",
+            verified_at=tax_data.verified_at,
+            rejection_reason=tax_data.rejection_reason,
+            withholding_percentage=tax_data.withholding_percentage,
+            is_iva_responsible=tax_data.is_iva_responsible,
+            created_at=tax_data.created_at,
+            updated_at=tax_data.updated_at,
+            # Legacy fields
+            document=tax_data.document,
+            bank_account=tax_data.bank_account,
+            withholdings=tax_data.withholding_percentage,
+            verified=(tax_data.verification_status.value == "verified" if tax_data.verification_status else False)
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+@router.post(
+    "/tax-data/{user_id}/reject",
+    response_model=TaxDataResponse,
+    summary="Rechazar datos fiscales (Administrador)",
+    description="""
+    **Rechazar Datos Fiscales (HU005 - Solo Administradores)**
+    
+    Permite a los administradores rechazar los datos fiscales de un usuario.
+    Debe proporcionar un motivo de rechazo.
+    
+    **Autenticación requerida:**
+    - Requiere un token JWT válido en el header `Authorization: Bearer <token>`
+    - El usuario debe ser de tipo `admin`
+    
+    **Parámetros de ruta:**
+    - **user_id**: ID del usuario cuyos datos fiscales se van a rechazar
+    
+    **Parámetros de query:**
+    - **rejection_reason**: Motivo del rechazo (mínimo 10, máximo 500 caracteres)
+    
+    **Comportamiento:**
+    - Cambia el estado de validación a **REJECTED**
+    - Registra la fecha de rechazo
+    - Guarda el motivo de rechazo para que el usuario pueda corregir
+    
+    **Errores:**
+    - Si el usuario no existe, retorna 404
+    - Si el usuario no tiene datos fiscales, retorna 400
+    - Si no se proporciona motivo de rechazo, retorna 400
+    """,
+    response_description="Datos fiscales rechazados"
+)
+async def reject_tax_data(
+    user_id: int,
+    rejection_reason: str = Query(..., min_length=10, max_length=500, description="Motivo del rechazo"),
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    tax_service = TaxDataService(db)
+    
+    try:
+        tax_data = tax_service.update_verification_status(
+            user_id=user_id,
+            status=TaxDataVerificationStatus.REJECTED,
+            rejection_reason=rejection_reason
+        )
+        
+        return TaxDataResponse(
+            tax_data_id=tax_data.tax_data_id,
+            document_type=tax_data.document_type.value if tax_data.document_type else None,
+            tax_identification_number=tax_data.tax_identification_number,
+            tax_regime=tax_data.tax_regime.value if tax_data.tax_regime else None,
+            rut_document_url=tax_data.rut_document_url,
+            bank_name=tax_data.bank_name,
+            bank_account_type=tax_data.bank_account_type.value if tax_data.bank_account_type else None,
+            bank_account_number=tax_data.bank_account_number,
+            bank_account_holder=tax_data.bank_account_holder,
+            verification_status=tax_data.verification_status.value if tax_data.verification_status else "pending",
+            verified_at=tax_data.verified_at,
+            rejection_reason=tax_data.rejection_reason,
+            withholding_percentage=tax_data.withholding_percentage,
+            is_iva_responsible=tax_data.is_iva_responsible,
+            created_at=tax_data.created_at,
+            updated_at=tax_data.updated_at,
+            # Legacy fields
+            document=tax_data.document,
+            bank_account=tax_data.bank_account,
+            withholdings=tax_data.withholding_percentage,
+            verified=(tax_data.verification_status.value == "verified" if tax_data.verification_status else False)
         )
     except ValueError as e:
         raise HTTPException(

@@ -4,7 +4,7 @@ Database models (SQLAlchemy)
 from app.models.base import Base
 
 # Base models
-from app.models.tax_data import TaxData, TaxRegime, BankAccountType
+from app.models.tax_data import TaxData, TaxRegime, BankAccountType, DocumentType, TaxDataVerificationStatus
 from app.models.user import User, UserType, VerificationStatus, AccountStatus
 from app.models.user_profile import UserProfile, ProfileType
 from app.models.email_verification import EmailVerification
@@ -58,6 +58,8 @@ __all__ = [
     "TaxData",
     "TaxRegime",
     "BankAccountType",
+    "DocumentType",
+    "TaxDataVerificationStatus",
     "User",
     "UserType",
     "VerificationStatus",

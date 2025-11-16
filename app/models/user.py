@@ -51,7 +51,7 @@ class User(Base):
     phone_number = Column(String(20), nullable=True, unique=True, index=True)
     name = Column(String(100), nullable=False)  # full_name
     profile_picture = Column(String(500), nullable=True)  # profile_picture_url
-    biography = Column(String(500), nullable=True)  # bio
+    biography = Column(String(150), nullable=True)  # bio (HU004: máximo 150 caracteres)
     user_type = Column(SQLEnum(UserType), nullable=False, default=UserType.USER)
     
     # Business account fields (SOLO visual, NO funcional)
@@ -64,6 +64,9 @@ class User(Base):
     identity_document_number = Column(String(50), nullable=True)
     birth_date = Column(Date, nullable=True)
     gender = Column(String(20), nullable=True)
+    # HU004: Ubicación (ciudad/país)
+    city = Column(String(100), nullable=True)  # Ciudad
+    country = Column(String(100), nullable=True)  # País
     two_factor_enabled = Column(Boolean, default=False)
     two_factor_secret = Column(String(255), nullable=True)
     account_status = Column(SQLEnum(AccountStatus), default=AccountStatus.ACTIVE)

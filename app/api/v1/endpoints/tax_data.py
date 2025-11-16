@@ -35,13 +35,28 @@ router = APIRouter()
     - Requiere un token JWT válido en el header `Authorization: Bearer <token>`
     
     **Parámetros requeridos:**
-    - **document**: Documento de identificación fiscal (NIT, Cédula de Ciudadanía, etc.)
-    - **bank_account**: Número de cuenta bancaria donde recibir pagos
-    - **tax_regime**: Régimen fiscal del usuario. Ejemplos: 'Simplificado', 'Común', 'Gran Contribuyente', etc.
+    - **document_type**: Tipo de documento (NIT, CC, CE, PASAPORTE, OTRO)
+    - **tax_identification_number**: Número de documento/NIT
+    - **tax_regime**: Régimen tributario (simplificado, común, gran_contribuyente)
+    - **bank_name**: Nombre del banco
+    - **bank_account_type**: Tipo de cuenta (ahorros, corriente)
+    - **bank_account_number**: Número de cuenta bancaria
+    
+    **Parámetros opcionales:**
+    - **rut_document_url**: URL del RUT (PDF/imagen) subido a S3
+      - Primero sube el archivo usando: **POST /api/v1/files/upload**
+      - Usa la URL retornada en este campo
+    - **bank_account_holder**: Titular de la cuenta (opcional)
+    
+    **Flujo de trabajo para RUT:**
+    1. Sube el RUT usando: `POST /api/v1/files/upload` con `s3_key: "tax_documents/rut_user_{user_id}.pdf"`
+    2. Obtén la URL del archivo desde la respuesta
+    3. Usa esa URL en `rut_document_url` al crear los datos fiscales
     
     **Comportamiento:**
     - Crea un registro de datos fiscales asociado al usuario autenticado
     - Calcula automáticamente las retenciones basándose en el régimen fiscal seleccionado
+    - Estado inicial: **PENDING** (pendiente validación)
     - Los datos fiscales son necesarios para procesar pagos y generar facturas
     
     **Nota:** Solo se permite un registro de datos fiscales por usuario. Para actualizar, use el endpoint PUT.
@@ -60,10 +75,26 @@ async def create_tax_data(
         
         return TaxDataResponse(
             tax_data_id=tax_data_obj.tax_data_id,
+            document_type=tax_data_obj.document_type.value if tax_data_obj.document_type else None,
+            tax_identification_number=tax_data_obj.tax_identification_number,
+            tax_regime=tax_data_obj.tax_regime.value if tax_data_obj.tax_regime else None,
+            rut_document_url=tax_data_obj.rut_document_url,
+            bank_name=tax_data_obj.bank_name,
+            bank_account_type=tax_data_obj.bank_account_type.value if tax_data_obj.bank_account_type else None,
+            bank_account_number=tax_data_obj.bank_account_number,
+            bank_account_holder=tax_data_obj.bank_account_holder,
+            verification_status=tax_data_obj.verification_status.value if tax_data_obj.verification_status else "pending",
+            verified_at=tax_data_obj.verified_at,
+            rejection_reason=tax_data_obj.rejection_reason,
+            withholding_percentage=tax_data_obj.withholding_percentage,
+            is_iva_responsible=tax_data_obj.is_iva_responsible,
+            created_at=tax_data_obj.created_at,
+            updated_at=tax_data_obj.updated_at,
+            # Legacy fields
             document=tax_data_obj.document,
             bank_account=tax_data_obj.bank_account,
-            tax_regime=tax_data_obj.tax_regime,
-            withholdings=tax_data_obj.withholdings
+            withholdings=tax_data_obj.withholding_percentage,
+            verified=(tax_data_obj.verification_status.value == "verified" if tax_data_obj.verification_status else False)
         )
     except ValueError as e:
         raise HTTPException(
@@ -84,10 +115,13 @@ async def create_tax_data(
     **Autenticación requerida:**
     - Requiere un token JWT válido en el header `Authorization: Bearer <token>`
     
-    **Respuesta:**
-    - Documento de identificación fiscal
-    - Número de cuenta bancaria
-    - Régimen fiscal actual
+    **Respuesta incluye:**
+    - Tipo y número de documento/NIT
+    - Régimen tributario
+    - URL del RUT subido (si existe)
+    - Datos bancarios completos (banco, tipo de cuenta, número, titular)
+    - Estado de validación (pending, verified, rejected)
+    - Fecha de verificación y motivo de rechazo (si aplica)
     - Porcentaje de retenciones calculado automáticamente
     
     **Errores:**
@@ -111,10 +145,26 @@ async def get_tax_data(
     
     return TaxDataResponse(
         tax_data_id=tax_data.tax_data_id,
+        document_type=tax_data.document_type.value if tax_data.document_type else None,
+        tax_identification_number=tax_data.tax_identification_number,
+        tax_regime=tax_data.tax_regime.value if tax_data.tax_regime else None,
+        rut_document_url=tax_data.rut_document_url,
+        bank_name=tax_data.bank_name,
+        bank_account_type=tax_data.bank_account_type.value if tax_data.bank_account_type else None,
+        bank_account_number=tax_data.bank_account_number,
+        bank_account_holder=tax_data.bank_account_holder,
+        verification_status=tax_data.verification_status.value if tax_data.verification_status else "pending",
+        verified_at=tax_data.verified_at,
+        rejection_reason=tax_data.rejection_reason,
+        withholding_percentage=tax_data.withholding_percentage,
+        is_iva_responsible=tax_data.is_iva_responsible,
+        created_at=tax_data.created_at,
+        updated_at=tax_data.updated_at,
+        # Legacy fields
         document=tax_data.document,
         bank_account=tax_data.bank_account,
-        tax_regime=tax_data.tax_regime,
-        withholdings=tax_data.withholdings
+        withholdings=tax_data.withholding_percentage,
+        verified=(tax_data.verification_status.value == "verified" if tax_data.verification_status else False)
     )
 
 
@@ -131,13 +181,19 @@ async def get_tax_data(
     - Requiere un token JWT válido en el header `Authorization: Bearer <token>`
     
     **Parámetros opcionales (solo se actualizan los campos proporcionados):**
-    - **document**: Nuevo documento de identificación fiscal
-    - **bank_account**: Nuevo número de cuenta bancaria
-    - **tax_regime**: Nuevo régimen fiscal
+    - **document_type**: Tipo de documento
+    - **tax_identification_number**: Número de documento/NIT
+    - **tax_regime**: Régimen tributario
+    - **rut_document_url**: URL del RUT subido a S3 (obtenida de /api/v1/files/upload)
+    - **bank_name**: Nombre del banco
+    - **bank_account_type**: Tipo de cuenta bancaria
+    - **bank_account_number**: Número de cuenta bancaria
+    - **bank_account_holder**: Titular de la cuenta
     
     **Comportamiento:**
     - Solo actualiza los campos que se proporcionan en la solicitud
     - Si se actualiza el `tax_regime`, las retenciones se recalculan automáticamente
+    - Si se actualiza cualquier campo, el estado vuelve a **PENDING** (requiere revalidación)
     - Si el usuario no tiene datos fiscales, debe usar el endpoint POST primero
     
     **Nota:** Los cambios en los datos fiscales pueden afectar los cálculos de retenciones en futuras transacciones.
@@ -156,10 +212,26 @@ async def update_tax_data(
         
         return TaxDataResponse(
             tax_data_id=tax_data_obj.tax_data_id,
+            document_type=tax_data_obj.document_type.value if tax_data_obj.document_type else None,
+            tax_identification_number=tax_data_obj.tax_identification_number,
+            tax_regime=tax_data_obj.tax_regime.value if tax_data_obj.tax_regime else None,
+            rut_document_url=tax_data_obj.rut_document_url,
+            bank_name=tax_data_obj.bank_name,
+            bank_account_type=tax_data_obj.bank_account_type.value if tax_data_obj.bank_account_type else None,
+            bank_account_number=tax_data_obj.bank_account_number,
+            bank_account_holder=tax_data_obj.bank_account_holder,
+            verification_status=tax_data_obj.verification_status.value if tax_data_obj.verification_status else "pending",
+            verified_at=tax_data_obj.verified_at,
+            rejection_reason=tax_data_obj.rejection_reason,
+            withholding_percentage=tax_data_obj.withholding_percentage,
+            is_iva_responsible=tax_data_obj.is_iva_responsible,
+            created_at=tax_data_obj.created_at,
+            updated_at=tax_data_obj.updated_at,
+            # Legacy fields
             document=tax_data_obj.document,
             bank_account=tax_data_obj.bank_account,
-            tax_regime=tax_data_obj.tax_regime,
-            withholdings=tax_data_obj.withholdings
+            withholdings=tax_data_obj.withholding_percentage,
+            verified=(tax_data_obj.verification_status.value == "verified" if tax_data_obj.verification_status else False)
         )
     except ValueError as e:
         raise HTTPException(

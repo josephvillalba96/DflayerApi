@@ -17,7 +17,7 @@ Historia de Usuario: HU005 (Gestión de Datos Fiscales)
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import datetime
-from app.models.tax_data import TaxData
+from app.models.tax_data import TaxData, TaxDataVerificationStatus
 from app.models.user import User
 from app.schemas.tax_data import TaxDataCreateRequest, TaxDataUpdateRequest
 
@@ -116,14 +116,30 @@ class TaxDataService:
             raise ValueError("User already has tax data. Use update endpoint instead.")
         
         # Calculate withholdings
-        withholdings_rate = self.calculate_withholdings(tax_data.tax_regime)
+        withholdings_rate = self.calculate_withholdings(tax_data.tax_regime.value if hasattr(tax_data.tax_regime, 'value') else str(tax_data.tax_regime))
         
-        # Create tax data
+        # Create tax data (HU005)
         new_tax_data = TaxData(
-            document=tax_data.document,
-            bank_account=tax_data.bank_account,
+            user_id=user_id,
+            # HU005: Tipo de documento y número
+            document_type=tax_data.document_type,
+            tax_identification_number=tax_data.tax_identification_number,
+            # HU005: Régimen tributario
             tax_regime=tax_data.tax_regime,
-            withholdings=withholdings_rate
+            # HU005: Upload de RUT
+            rut_document_url=tax_data.rut_document_url,
+            # HU005: Datos bancarios
+            bank_name=tax_data.bank_name,
+            bank_account_type=tax_data.bank_account_type,
+            bank_account_number=tax_data.bank_account_number,
+            bank_account_holder=tax_data.bank_account_holder,
+            # HU005: Estado de validación (inicia como pendiente)
+            verification_status=TaxDataVerificationStatus.PENDING,
+            # Campos adicionales
+            withholding_percentage=withholdings_rate,
+            # Legacy fields (for compatibility)
+            document=tax_data.tax_identification_number,
+            bank_account=tax_data.bank_account_number
         )
         
         self.db.add(new_tax_data)
@@ -170,15 +186,42 @@ class TaxDataService:
         if not tax_data_obj:
             raise ValueError("Tax data not found")
         
-        # Update fields
-        if tax_data.document is not None:
-            tax_data_obj.document = tax_data.document
-        if tax_data.bank_account is not None:
-            tax_data_obj.bank_account = tax_data.bank_account
+        # Update fields (HU005)
+        if tax_data.document_type is not None:
+            tax_data_obj.document_type = tax_data.document_type
+        if tax_data.tax_identification_number is not None:
+            tax_data_obj.tax_identification_number = tax_data.tax_identification_number
+            tax_data_obj.document = tax_data.tax_identification_number  # Legacy
         if tax_data.tax_regime is not None:
             tax_data_obj.tax_regime = tax_data.tax_regime
             # Recalculate withholdings if regime changed
-            tax_data_obj.withholdings = self.calculate_withholdings(tax_data.tax_regime)
+            regime_value = tax_data.tax_regime.value if hasattr(tax_data.tax_regime, 'value') else str(tax_data.tax_regime)
+            tax_data_obj.withholding_percentage = self.calculate_withholdings(regime_value)
+        if tax_data.rut_document_url is not None:
+            tax_data_obj.rut_document_url = tax_data.rut_document_url
+        if tax_data.bank_name is not None:
+            tax_data_obj.bank_name = tax_data.bank_name
+        if tax_data.bank_account_type is not None:
+            tax_data_obj.bank_account_type = tax_data.bank_account_type
+        if tax_data.bank_account_number is not None:
+            tax_data_obj.bank_account_number = tax_data.bank_account_number
+            tax_data_obj.bank_account = tax_data.bank_account_number  # Legacy
+        if tax_data.bank_account_holder is not None:
+            tax_data_obj.bank_account_holder = tax_data.bank_account_holder
+        
+        # Si se actualiza información, el estado vuelve a pendiente (requiere revalidación)
+        if any([
+            tax_data.document_type is not None,
+            tax_data.tax_identification_number is not None,
+            tax_data.tax_regime is not None,
+            tax_data.rut_document_url is not None,
+            tax_data.bank_name is not None,
+            tax_data.bank_account_type is not None,
+            tax_data.bank_account_number is not None
+        ]):
+            tax_data_obj.verification_status = TaxDataVerificationStatus.PENDING
+            tax_data_obj.verified_at = None
+            tax_data_obj.rejection_reason = None
         
         self.db.commit()
         self.db.refresh(tax_data_obj)
@@ -222,5 +265,55 @@ class TaxDataService:
         if tax_data:
             return [tax_data]
         return []
+    
+    def update_verification_status(
+        self,
+        user_id: int,
+        status: TaxDataVerificationStatus,
+        rejection_reason: Optional[str] = None
+    ) -> TaxData:
+        """
+        Actualiza el estado de validación de los datos fiscales (HU005)
+        
+        Solo puede ser llamado por administradores para validar o rechazar
+        los datos fiscales de un usuario.
+        
+        Args:
+            user_id: ID del usuario
+            status: Nuevo estado de validación (VERIFIED o REJECTED)
+            rejection_reason: Motivo de rechazo (solo si status es REJECTED)
+        
+        Returns:
+            Objeto TaxData actualizado
+        
+        Raises:
+            ValueError: Si el usuario no existe o no tiene datos fiscales
+        """
+        user = self.db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise ValueError("User not found")
+        
+        if not user.tax_data_id:
+            raise ValueError("User has no tax data")
+        
+        tax_data_obj = self.db.query(TaxData).filter(
+            TaxData.tax_data_id == user.tax_data_id
+        ).first()
+        
+        if not tax_data_obj:
+            raise ValueError("Tax data not found")
+        
+        tax_data_obj.verification_status = status
+        tax_data_obj.verified_at = datetime.utcnow()
+        
+        if status == TaxDataVerificationStatus.REJECTED:
+            tax_data_obj.rejection_reason = rejection_reason
+        else:
+            tax_data_obj.rejection_reason = None
+        
+        self.db.commit()
+        self.db.refresh(tax_data_obj)
+        
+        return tax_data_obj
 
 
