@@ -14,7 +14,6 @@ En Docker (contenedor api):
 from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import ProgrammingError
 
 from app.db.base import SessionLocal
 from app.core.security import get_password_hash
@@ -152,40 +151,32 @@ def seed_audio_tracks(db: Session) -> None:
         },
     ]
 
-    try:
-        for data in tracks_to_create:
-            exists = (
-                db.query(AudioTrack)
-                .filter(
-                    AudioTrack.title == data["title"],
-                    AudioTrack.artist == data["artist"],
-                )
-                .first()
+    for data in tracks_to_create:
+        exists = (
+            db.query(AudioTrack)
+            .filter(
+                AudioTrack.title == data["title"],
+                AudioTrack.artist == data["artist"],
             )
-            if exists:
-                print(f"[seed] AudioTrack ya existe: {data['title']} - {data['artist']}")
-                continue
+            .first()
+        )
+        if exists:
+            print(f"[seed] AudioTrack ya existe: {data['title']} - {data['artist']}")
+            continue
 
-            track = AudioTrack(
-                title=data["title"],
-                artist=data["artist"],
-                storage_path=data["storage_path"],
-                format=data["format"],
-                duration_seconds=data.get("duration_seconds"),
-                is_original_audio=True,
-                created_at=datetime.utcnow(),
-            )
-            db.add(track)
-            db.commit()
-            db.refresh(track)
-            print(f"[seed] AudioTrack creado: {track.title} (id={track.audio_id})")
-    except ProgrammingError as e:
-        # Si la tabla audio_tracks no existe todavía, omitimos este seed
-        if "audio_tracks" in str(e):
-            print("[seed] Tabla 'audio_tracks' no existe todavía. Omitiendo seed de pistas de audio.")
-            db.rollback()
-        else:
-            raise
+        track = AudioTrack(
+            title=data["title"],
+            artist=data["artist"],
+            storage_path=data["storage_path"],
+            format=data["format"],
+            duration_seconds=data.get("duration_seconds"),
+            is_original_audio=True,
+            created_at=datetime.utcnow(),
+        )
+        db.add(track)
+        db.commit()
+        db.refresh(track)
+        print(f"[seed] AudioTrack creado: {track.title} (id={track.audio_id})")
 
 
 def run_seed() -> None:

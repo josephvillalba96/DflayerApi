@@ -25,7 +25,9 @@ def upgrade() -> None:
     op.create_table(
         "audio_tracks",
         sa.Column("audio_id", sa.Integer(), primary_key=True, index=True),
-        sa.Column("media_id", sa.Integer(), sa.ForeignKey("media_files.media_id"), nullable=True),
+        # Dejamos media_id sin foreign key porque en la BD legacy la tabla es "multimedia_files"
+        # y el modelo actual usa "media_files". Esto evita errores de FK y permite uso opcional.
+        sa.Column("media_id", sa.Integer(), nullable=True),
         sa.Column("post_id", sa.Integer(), sa.ForeignKey("contents.content_id"), nullable=True),
         sa.Column("title", sa.String(length=200), nullable=True),
         sa.Column("artist", sa.String(length=200), nullable=True),
