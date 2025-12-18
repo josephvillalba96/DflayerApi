@@ -22,6 +22,10 @@ def upgrade() -> None:
     """
     Crea la tabla audio_tracks según el modelo AudioTrack.
     """
+    # Asegurarnos de que no haya restos de ejecuciones previas parcialmente aplicadas
+    op.execute("DROP INDEX IF EXISTS ix_audio_tracks_audio_id")
+    op.execute("DROP TABLE IF EXISTS audio_tracks CASCADE")
+
     op.create_table(
         "audio_tracks",
         sa.Column("audio_id", sa.Integer(), primary_key=True, index=True),
@@ -42,14 +46,12 @@ def upgrade() -> None:
         sa.Column("created_at", sa.Date(), nullable=True),
         sa.Column("updated_at", sa.Date(), nullable=True),
     )
-    op.create_index("ix_audio_tracks_audio_id", "audio_tracks", ["audio_id"], unique=False)
 
 
 def downgrade() -> None:
     """
     Elimina la tabla audio_tracks.
     """
-    op.drop_index("ix_audio_tracks_audio_id", table_name="audio_tracks")
     op.drop_table("audio_tracks")
 
 
