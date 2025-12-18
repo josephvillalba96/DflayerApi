@@ -6,7 +6,7 @@ module.exports = {
         cwd: "/home/ubuntu/DflayerApi",
   
         script: ".venv/bin/uvicorn",
-        args: "main:app --host 127.0.0.1 --port 8000",
+        args: "app.main:app --host 127.0.0.1 --port 8000",
   
         interpreter: "none",
         exec_mode: "fork",
