@@ -73,11 +73,11 @@ class Content(Base):
     post_hashtags = relationship("PostHashtag", back_populates="post")  # POST_HASHTAGS from spec
     
     # Monetization relationships
-    interactions = relationship("Interaction", back_populates="content")
+    interactions = relationship("Interaction", foreign_keys="Interaction.post_id", back_populates="content")
     
     # Multimedia files relationship
     multimedia_files = relationship("MultimediaFile", foreign_keys="MultimediaFile.post_id", back_populates="content")
-    media_files = relationship("MultimediaFile", foreign_keys="MultimediaFile.post_id", back_populates="content")  # Alias
+    media_files = relationship("MultimediaFile", foreign_keys="MultimediaFile.post_id", back_populates="content", overlaps="multimedia_files")  # Alias
     
     # Mentions relationship
     mentions = relationship("PostMention", back_populates="post")

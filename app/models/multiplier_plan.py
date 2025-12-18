@@ -9,7 +9,7 @@ from app.models.base import Base
 
 class MembershipPlan(Base):
     """Membership plan model (MEMBERSHIP_PLANS)"""
-    __tablename__ = "membership_plans"  # multiplier_plans en legacy
+    __tablename__ = "multiplier_plans"  # Legacy table name, will be renamed to membership_plans in future migration
 
     plan_id = Column(Integer, primary_key=True, index=True)
     plan_name = Column(String(100), nullable=False)
@@ -31,7 +31,7 @@ class UserMembership(Base):
 
     membership_id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
-    plan_id = Column(Integer, ForeignKey("membership_plans.plan_id"), nullable=False)
+    plan_id = Column(Integer, ForeignKey("multiplier_plans.plan_id"), nullable=False)  # Legacy table name
     start_date = Column(Date, nullable=False)
     end_date = Column(Date, nullable=True)
     is_active = Column(Boolean, default=True)

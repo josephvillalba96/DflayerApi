@@ -76,5 +76,5 @@ class TaxData(Base):
     verified = Column(Boolean, default=False)  # Legacy - use verification_status instead
 
     # 1:1 relationship with User
-    user = relationship("User", back_populates="tax_data", uselist=False)
+    user = relationship("User", foreign_keys=[user_id], back_populates="tax_data", uselist=False)
 

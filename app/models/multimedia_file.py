@@ -51,7 +51,9 @@ class MultimediaFile(Base):
     file_size = Column(BigInteger, nullable=False)  # BIGINT
     mime_type = Column(String(100), nullable=True)
     storage_path = Column(String(500), nullable=False)  # s3_key en legacy
-    upload_status = Column(SQLEnum(UploadStatus), default=UploadStatus.UPLOADING)
+    # TEMPORAL: mientras no exista transcodificador real,
+    # marcamos todos los archivos nuevos como ya subidos/completados
+    upload_status = Column(SQLEnum(UploadStatus), default=UploadStatus.UPLOADED)
     duration_seconds = Column(Float, nullable=True)  # DECIMAL - para videos/audio
     width = Column(Integer, nullable=True)  # para imágenes/videos
     height = Column(Integer, nullable=True)
@@ -73,6 +75,8 @@ class MultimediaFile(Base):
     fps = Column(Float, nullable=True)  # Legacy
     sample_rate = Column(Integer, nullable=True)  # Legacy
     channels = Column(Integer, nullable=True)  # Legacy
+    # TEMPORAL: mientras no exista transcodificador real,
+    # consideramos que el procesamiento ya fue completado
     processing_status = Column(SQLEnum(ProcessingStatus), nullable=True)  # Legacy
     is_primary = Column(Boolean, default=False)  # Legacy
     is_public = Column(Boolean, default=True)  # Legacy

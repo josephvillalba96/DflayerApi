@@ -13,7 +13,7 @@ Historia de Usuario: HU006 (Crear Publicación)
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import datetime, timezone
-from app.models.content import Content, ContentType, Visibility
+from app.models.content import Content, ContentType, Visibility, ContentStatus
 from app.models.user import User, UserType
 from app.models.post_hashtag import PostHashtag
 from app.schemas.content import ContentCreateRequest, ContentUpdateRequest
@@ -96,6 +96,9 @@ class ContentService:
             published_at = datetime.now(timezone.utc)
         
         # Create content
+        # IMPORTANTE (TEMPORAL):
+        # - status se marca directamente como PUBLISHED para simular
+        #   que el contenido ya fue transcodificado y auditado/aprobado.
         content = Content(
             merchant_id=merchant_id,
             content_type=ContentType[content_data.content_type.upper()],
@@ -107,7 +110,9 @@ class ContentService:
             allow_comments=content_data.allow_comments,
             location=content_data.location if hasattr(content_data, 'location') else None,
             published_at=published_at,
-            active=True
+            active=True,
+            # Simulamos que ya pasó por todo el flujo (transcodificación + auditoría)
+            status=ContentStatus.PUBLISHED,
         )
         
         self.db.add(content)

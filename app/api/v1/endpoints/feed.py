@@ -5,6 +5,7 @@ Handles personalized content feed with recommendation algorithm
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import Optional
+from datetime import datetime
 
 from app.db.base import get_db
 from app.api.v1.endpoints.auth import get_current_user
@@ -100,16 +101,41 @@ async def get_feed(
         for item in feed_items:
             content = item["content"]
             
-            # Get hashtags
+            # Get hashtags from post_hashtags relationship (lazy load safe)
             hashtags = []
-            if content.hashtags:
-                hashtags = [ch.hashtag.name for ch in content.hashtags]
+            try:
+                if hasattr(content, 'post_hashtags') and content.post_hashtags:
+                    hashtags = [ph.hashtag for ph in content.post_hashtags]
+            except Exception:
+                hashtags = []
+            
+            # Get merchant name (lazy load safe)
+            merchant_name = None
+            try:
+                if content.merchant:
+                    merchant_name = content.merchant.name
+            except Exception:
+                pass
+            
+            # Convert Date to datetime for schema compatibility
+            created_at_dt = None
+            published_at_dt = None
+            if content.created_at:
+                if isinstance(content.created_at, datetime):
+                    created_at_dt = content.created_at
+                else:
+                    created_at_dt = datetime.combine(content.created_at, datetime.min.time())
+            if content.published_at:
+                if isinstance(content.published_at, datetime):
+                    published_at_dt = content.published_at
+                else:
+                    published_at_dt = datetime.combine(content.published_at, datetime.min.time())
             
             # Build content response
             content_response = ContentResponse(
                 content_id=content.content_id,
                 merchant_id=content.merchant_id,
-                merchant_name=content.merchant.name if content.merchant else None,
+                merchant_name=merchant_name,
                 content_type=content.content_type.value,
                 url=content.url,
                 title=content.title,
@@ -121,10 +147,10 @@ async def get_feed(
                 visibility=content.visibility.value,
                 allow_comments=content.allow_comments,
                 active=content.active,
-                created_at=content.created_at,
-                published_at=content.published_at,
-                location_id=content.location_id,
-                categories=[cc.category.name for cc in content.categories] if content.categories else [],
+                created_at=created_at_dt or datetime.utcnow(),
+                published_at=published_at_dt,
+                location_id=None,  # Location is VARCHAR, not FK
+                categories=[],  # Categories not implemented in Content model
                 hashtags=hashtags
             )
             
@@ -151,8 +177,13 @@ async def get_feed(
         )
     
     except Exception as e:
+        import traceback
+        error_detail = str(e)
+        traceback_str = traceback.format_exc()
+        print(f"Error in feed endpoint: {error_detail}")
+        print(f"Traceback: {traceback_str}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error generating feed: {str(e)}"
+            detail=f"Error generating feed: {error_detail}"
         )
 

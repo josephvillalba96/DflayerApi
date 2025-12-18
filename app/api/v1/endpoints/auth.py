@@ -167,7 +167,7 @@ async def register_user(
     Permite a un usuario autenticarse en el sistema usando su correo electrónico y contraseña.
     
     **Parámetros requeridos:**
-    - **email**: Correo electrónico del usuario
+    - **identify**: Correo electrónico o número de teléfono del usuario
     - **password**: Contraseña del usuario
     
     **Parámetros opcionales:**

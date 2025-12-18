@@ -1,0 +1,81 @@
+############################
+# Python / FastAPI
+############################
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pyo
+
+############################
+# Entornos virtuales
+############################
+venv/
+env/
+ENV/
+.venv/
+
+############################
+# Dependencias / builds
+############################
+dist/
+build/
+*.egg-info/
+
+############################
+# IDE / Editor
+############################
+.vscode/
+.idea/
+*.swp
+*.swo
+*.bak
+
+############################
+# Tests / Cobertura
+############################
+tests/__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+
+############################
+# Logs
+############################
+*.log
+logs/
+
+############################
+# Base de datos local
+############################
+*.db
+*.sqlite
+*.sqlite3
+app.db
+
+############################
+# Alembic
+############################
+alembic/__pycache__/
+alembic/versions/__pycache__/
+
+############################
+# Docker / Contenedores
+############################
+*.backup
+
+############################
+# Sistema Operativo
+############################
+.DS_Store
+Thumbs.db
+
+############################
+# Entornos / secretos
+############################
+.env
+.env.local
+.env.*.local
+
+

@@ -174,35 +174,59 @@ class AuthService:
                 print(f"[WARNING] Error al procesar SMS durante registro (no crítico): {str(e)}")
                 print(f"[INFO] El registro se completó exitosamente. El usuario puede verificar por email.")
         
+        # Commit all changes to database
+        self.db.commit()
+        
         return (user, verification_token, access_token)
     
     # Login
-    def authenticate_user(self, email: Optional[str] = None, phone_number: Optional[str] = None, password: str = "") -> Optional[User]:
+    def authenticate_user(self, identify: str, password: str = "") -> Optional[User]:
         """
         Autentica un usuario con email/teléfono y contraseña (HU002)
         
         Verifica las credenciales del usuario y retorna el objeto User si son válidas.
-        Permite autenticación con email o teléfono.
+        Permite autenticación con email o teléfono usando un solo campo 'identify'.
+        Detecta automáticamente si el valor es un email o un teléfono.
         
         Args:
-            email: Correo electrónico del usuario (opcional si se proporciona phone_number)
-            phone_number: Número de teléfono del usuario (opcional si se proporciona email)
+            identify: Correo electrónico o número de teléfono del usuario
             password: Contraseña en texto plano (se verifica contra el hash almacenado)
         
         Returns:
             Objeto User si las credenciales son válidas, None en caso contrario
         
         Raises:
-            ValueError: Si la cuenta está desactivada o si no se proporciona email ni teléfono
+            ValueError: Si la cuenta está desactivada o si identify está vacío
         """
-        if not email and not phone_number:
-            raise ValueError("Either email or phone_number must be provided")
+        if not identify or not identify.strip():
+            raise ValueError("identify field cannot be empty")
+        
+        identify = identify.strip()
+        
+        # Detect if identify is email or phone number
+        # Simple heuristic: if it contains @, it's an email; otherwise, it's a phone number
+        is_email = "@" in identify
         
         # Search by email or phone_number
-        if email:
-            user = self.db.query(User).filter(User.email == email).first()
+        if is_email:
+            user = self.db.query(User).filter(User.email == identify).first()
         else:
-            user = self.db.query(User).filter(User.phone_number == phone_number).first()
+            # For phone numbers, try exact match first
+            user = self.db.query(User).filter(User.phone_number == identify).first()
+            
+            # If not found, try with cleaned phone number (digits only)
+            if not user:
+                cleaned_identify = ''.join(filter(str.isdigit, identify))
+                if cleaned_identify:
+                    # Try to find by matching cleaned phone numbers
+                    # This handles cases where phone is stored with different formatting
+                    all_users = self.db.query(User).filter(User.phone_number.isnot(None)).all()
+                    for u in all_users:
+                        if u.phone_number:
+                            cleaned_db_phone = ''.join(filter(str.isdigit, u.phone_number))
+                            if cleaned_db_phone == cleaned_identify:
+                                user = u
+                                break
         
         if not user:
             return None
@@ -244,8 +268,7 @@ class AuthService:
             ValueError: Si las credenciales son inválidas o el código 2FA es incorrecto
         """
         user = self.authenticate_user(
-            email=login_data.email,
-            phone_number=login_data.phone_number,
+            identify=login_data.identify,
             password=login_data.password
         )
         if not user:

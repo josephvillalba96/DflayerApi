@@ -10,10 +10,10 @@ Este servicio genera feeds de contenido personalizados para usuarios:
 
 Historia de Usuario: HU007 (Feed Principal)
 """
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, func, desc
 from typing import List, Optional, Tuple
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from app.models.content import Content, Visibility, ContentType
 from app.models.user import User
@@ -123,12 +123,11 @@ class FeedService:
             except (TypeError, AttributeError):
                 pass
         
-        # Boost for content with engagement
-        if content.metrics:
-            if content.metrics.likes_count > 0:
-                score += min(content.metrics.likes_count * 0.1, 5.0)
-            if content.metrics.comments_count > 0:
-                score += min(content.metrics.comments_count * 0.2, 5.0)
+        # Boost for content with engagement (using denormalized counters)
+        if content.like_count and content.like_count > 0:
+            score += min(content.like_count * 0.1, 5.0)
+        if content.comment_count and content.comment_count > 0:
+            score += min(content.comment_count * 0.2, 5.0)
         
         return score
     
@@ -152,17 +151,12 @@ class FeedService:
         Returns:
             Score de engagement (mayor = más popular/engaging)
         """
-        if not content.metrics:
-            return 0.0
-        
-        metrics = content.metrics
-        
-        # Base engagement metrics
+        # Base engagement metrics (using denormalized counters from Content model)
         engagement = (
-            metrics.views * 0.1 +
-            metrics.likes_count * 2.0 +
-            metrics.comments_count * 3.0 +
-            metrics.shares_count * 5.0
+            (content.view_count or 0) * 0.1 +
+            (content.like_count or 0) * 2.0 +
+            (content.comment_count or 0) * 3.0 +
+            (content.share_count or 0) * 5.0
         )
         
         # Recency boost (more recent = higher score)
@@ -226,7 +220,7 @@ class FeedService:
             algorithm = preferences["algorithm_preference"]
         
         # Base query: only public, active, and published content
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.utcnow().date()  # published_at is Date, not DateTime
         query = self.db.query(Content).filter(
             Content.visibility == Visibility.PUBLIC,
             Content.active == True,
@@ -271,8 +265,11 @@ class FeedService:
         # Get total count before pagination
         total = query.count()
         
-        # Apply pagination
-        contents = query.offset(skip).limit(limit).all()
+        # Apply pagination with eager loading of relationships
+        contents = query.options(
+            joinedload(Content.merchant),
+            joinedload(Content.post_hashtags)
+        ).offset(skip).limit(limit).all()
         
         # Apply algorithm-specific sorting
         if algorithm == "recommended":

@@ -57,7 +57,7 @@ class Transaction(Base):
     
     # Legacy relationships
     user = relationship("User", foreign_keys=[user_id], back_populates="transactions")  # Legacy
-    voucher = relationship("Voucher", back_populates="transaction", uselist=False)  # Legacy
+    voucher = relationship("Bono", foreign_keys="Bono.transaction_id", back_populates="transaction", uselist=False)  # Legacy: Voucher is alias
     
     # New relationships
     withdrawal_requests = relationship("WithdrawalRequest", back_populates="transaction")

@@ -51,5 +51,5 @@ class Interaction(Base):
     
     # Relationship with payment distributions
     interaction_distributions = relationship("InteractionDistribution", back_populates="interaction")
-    payment_distributions = relationship("PaymentDistribution", back_populates="interaction")  # Legacy
+    payment_distributions = relationship("InteractionDistribution", foreign_keys="InteractionDistribution.interaction_id", back_populates="interaction", overlaps="interaction_distributions")  # Legacy: PaymentDistribution is alias
 

@@ -88,8 +88,8 @@ class User(Base):
     last_login_at = Column(Date, nullable=True)
 
     # Relationships
-    tax_data = relationship("TaxData", back_populates="user")
-    multiplier_plan = relationship("MembershipPlan", foreign_keys=[multiplier_plan_id])  # MultiplierPlan is alias
+    tax_data = relationship("TaxData", primaryjoin="User.user_id == TaxData.user_id", back_populates="user", uselist=False)
+    multiplier_plan = relationship("MembershipPlan", primaryjoin="User.multiplier_plan_id == MembershipPlan.plan_id", foreign_keys=[multiplier_plan_id], uselist=False)  # MultiplierPlan is alias
     
     # Relationships as merchant/comercio
     contents = relationship("Content", back_populates="merchant", foreign_keys="Content.merchant_id")
@@ -115,13 +115,13 @@ class User(Base):
     # Monetization relationships
     interactions = relationship("Interaction", back_populates="user")
     transactions = relationship("Transaction", back_populates="user")
-    payment_distributions = relationship("PaymentDistribution", back_populates="user")
+    payment_distributions = relationship("InteractionDistribution", foreign_keys="InteractionDistribution.user_id", back_populates="user")  # Legacy: PaymentDistribution is alias
     
     # Notifications relationship
     notifications = relationship("Notification", back_populates="user")
     
     # Plan relationships
-    plans = relationship("UserMembership", back_populates="user")  # UserPlan is alias of UserMembership
+    plans = relationship("UserMembership", back_populates="user", overlaps="memberships")  # UserPlan is alias of UserMembership
     
     # New relationships
     profile = relationship("UserProfile", back_populates="user", uselist=False)
@@ -129,7 +129,7 @@ class User(Base):
     referrals_sent = relationship("ReferralNetwork", foreign_keys="ReferralNetwork.referrer_id", back_populates="referrer")
     referrals_received = relationship("ReferralNetwork", foreign_keys="ReferralNetwork.referred_id", back_populates="referred")
     mentions_received = relationship("PostMention", foreign_keys="PostMention.mentioned_user_id", back_populates="mentioned_user")
-    memberships = relationship("UserMembership", back_populates="user")
+    memberships = relationship("UserMembership", back_populates="user", overlaps="plans")  # Alias for plans
     survey_responses = relationship("SurveyResponse", back_populates="user")
     interaction_distributions_received = relationship("InteractionDistribution", foreign_keys="InteractionDistribution.beneficiary_user_id", back_populates="beneficiary_user")
     bono_purchases = relationship("BonoPurchase", back_populates="buyer")

@@ -129,13 +129,22 @@ class UploadService:
         # Subir a S3 si está configurado, sino guardar localmente
         if self.use_s3:
             try:
-                url = self.s3_service.upload_file(
+                # Subir a S3 (siempre como private, acceso a través de la API)
+                self.s3_service.upload_file(
                     file_content=file_content,
                     s3_key=s3_key,
                     content_type=content_type,
-                    acl="public-read"  # Las fotos de perfil son públicas
+                    acl="private"  # Siempre privado, acceso solo a través de la API
                 )
                 logger.info(f"Profile picture uploaded to S3: {s3_key}")
+                
+                # Generar URL basada en la API usando BASE_URL
+                from urllib.parse import quote
+                base_url = getattr(settings, "BASE_URL", "http://localhost:8000")
+                base_url = base_url.rstrip('/')
+                encoded_s3_key = quote(s3_key, safe='')
+                url = f"{base_url}{settings.API_V1_STR}/files/{encoded_s3_key}"
+                
                 return url
             except Exception as e:
                 logger.error(f"Error uploading to S3, falling back to local storage: {str(e)}")
@@ -169,12 +178,39 @@ class UploadService:
         
         Args:
             file_url: URL o ruta del archivo a eliminar
+                    Puede ser una URL de la API: {BASE_URL}/api/v1/files/{s3_key}
+                    O una ruta local: /uploads/profile_pictures/filename
         
         Returns:
             True si se eliminó correctamente, False en caso contrario
         """
         try:
-            # Determinar si es una URL de S3
+            from urllib.parse import unquote
+            
+            # Determinar si es una URL de la API (nueva forma)
+            if self.use_s3 and f"{settings.API_V1_STR}/files/" in file_url:
+                # Extraer s3_key de la URL de la API: {BASE_URL}/api/v1/files/{s3_key}
+                try:
+                    # Dividir por "/api/v1/files/" o "/files/" y tomar lo que sigue
+                    if f"{settings.API_V1_STR}/files/" in file_url:
+                        parts = file_url.split(f"{settings.API_V1_STR}/files/")
+                    else:
+                        parts = file_url.split("/files/")
+                    if len(parts) > 1:
+                        s3_key = unquote(parts[1])  # Decodificar URL-encoding
+                        
+                        # Eliminar de S3
+                        try:
+                            self.s3_service.delete_file(s3_key)
+                            logger.info(f"Profile picture deleted from S3: {s3_key}")
+                            return True
+                        except Exception as e:
+                            logger.error(f"Error deleting from S3: {str(e)}")
+                            return False
+                except Exception as e:
+                    logger.error(f"Error parsing API URL: {str(e)}")
+            
+            # Fallback: Intentar extraer s3_key de URLs de S3 directas (legacy)
             if self.use_s3 and ("s3.amazonaws.com" in file_url or 
                                (settings.AWS_S3_ENDPOINT_URL and settings.AWS_S3_ENDPOINT_URL in file_url)):
                 # Extraer s3_key de la URL

@@ -67,21 +67,18 @@ class UserLoginRequest(BaseModel):
     """
     Schema for user login (HU002)
     
-    Permite login con email o teléfono
+    Permite login con email o teléfono usando un solo campo 'identify'
     """
-    email: Optional[EmailStr] = Field(None, description="Email address (required if phone_number not provided)")
-    phone_number: Optional[str] = Field(None, max_length=20, description="Phone number (required if email not provided)")
+    identify: str = Field(..., description="Email address or phone number")
     password: str
     two_factor_code: Optional[str] = Field(None, max_length=6, description="2FA code if enabled")
     
-    @root_validator(skip_on_failure=True)
-    def validate_at_least_one_identifier(cls, values):
-        """Ensure at least email or phone_number is provided"""
-        email = values.get('email')
-        phone = values.get('phone_number')
-        if not email and not phone:
-            raise ValueError('Either email or phone_number must be provided')
-        return values
+    @validator('identify')
+    def validate_identify(cls, v):
+        """Validate that identify is not empty"""
+        if not v or not v.strip():
+            raise ValueError('identify field cannot be empty')
+        return v.strip()
 
 
 class TokenResponse(BaseSchema):
